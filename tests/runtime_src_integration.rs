@@ -1539,7 +1539,9 @@ fn every_runtime_method_body_concretely_typed() {
     // `iso8601_ms`'s `::Time` parameter. What it bought:
     // `has_secure_password`'s password-reset token, which the Rails 8
     // authentication generator's PasswordsController and mailer use.
-    const CEILING: usize = 521;
+    // 521 -> 522: Date JSON conversion in ActiveRecord::Base#_as_json_only
+    // adds one dynamic seam read through ActiveSupport.format_db_date.
+    const CEILING: usize = 522;
     assert!(
         total_gradual <= CEILING,
         "{total_gradual} Ty::Untyped sites exceeds ceiling of {CEILING}",

@@ -935,7 +935,12 @@ fn untyped_subexpressions_with_rbs_baseline() {
     // runtime_src_integration counts ONE site (`Time.now + expires_in`).
     // What it buys: the Rails 8 authentication generator's password
     // reset flow, in Rails' own token format.
-    const CEILING: usize = 1209;
+    // 2026-10-04: 1209 -> 1216, +7 for the date-column branch in
+    // `_as_json_only` (schema_date_columns and format_db_date). It
+    // preserves the Date JSON form on the Spinel tree while leaving the
+    // DateTime path on json_time; all seven new residuals are in that
+    // shared runtime method's gradual storage boundary.
+    const CEILING: usize = 1216;
 
     assert!(
         all_untyped.len() <= CEILING,
