@@ -1425,6 +1425,14 @@ module ActiveStorage
       b = @blob
       b.nil? ? "" : b.redirect_url("")
     end
+
+    # Rails' `Attachment#purge`: drop the join row, then the blob.
+    def purge
+      b = @blob
+      ActiveRecord.adapter.delete("active_storage_attachments", @id)
+      b.purge unless b.nil?
+      nil
+    end
   end
 
   # What a `has_many_attached :uploads` reader hands back. Always
@@ -1486,6 +1494,20 @@ module ActiveStorage
         i += 1
       end
       rows
+    end
+
+    # Rails' `Attached::Many#find` (delegate_missing_to :attachments): the
+    # join row with that id, or RecordNotFound.
+    def find(id)
+      key = id.to_s
+      rows = attachments
+      i = 0
+      n = rows.length
+      while i < n
+        return rows[i] if rows[i].id.to_s == key
+        i += 1
+      end
+      raise ActiveRecord::RecordNotFound.new("Couldn't find ActiveStorage::Attachment with 'id'=" + key, "ActiveStorage::Attachment", "id", key)
     end
 
     # `self.embeds = blobs` for blob ids, in order: Rails' replace on

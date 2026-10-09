@@ -851,7 +851,11 @@ fn every_runtime_method_body_concretely_typed() {
     // conditional/ternary result), and the body reads it twice
     // (`value.nil?`, `value.to_s`).
     // Rebased onto main after `in_batches`: MEASURED 317 with haml_class, under main's 318.
-    const CEILING: usize = 317;
+    // `AttachedMany#find` (#729, Rails' `delegate_missing_to :attachments`
+    // forwarding `find(id)`) adds 1, MEASURED: its `id` param is `untyped`
+    // in the RBS (an Integer or String, as Rails casts) and the body reads
+    // it once (`id.to_s`).
+    const CEILING: usize = 318;
     assert!(
         total_gradual <= CEILING,
         "{total_gradual} Ty::Untyped sites exceeds ceiling of {CEILING}",

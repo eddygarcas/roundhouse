@@ -233,6 +233,7 @@ module ActiveStorage
     def filename: () -> ActiveStorage::Filename?
     def content_type: () -> String?
     def url: () -> String
+    def purge: () -> nil
   end
 
   # `has_many_attached` proxy — always non-nil; `attach_blob` appends.
@@ -247,6 +248,7 @@ module ActiveStorage
     def attachments: () -> Array[ActiveStorage::ManyAttachment]
     def _preload_rows: (Array[ActiveStorage::ManyAttachment] rows) -> nil
     def each: () { (ActiveStorage::ManyAttachment) -> untyped } -> Array[ActiveStorage::ManyAttachment]
+    def find: (untyped id) -> ActiveStorage::ManyAttachment
     def _sync_blob_ids: (Array[Integer] blob_ids) -> nil
     def attach_blob: (ActiveStorage::Blob blob) -> nil
     def attach: (String data, String filename, String content_type) -> nil
