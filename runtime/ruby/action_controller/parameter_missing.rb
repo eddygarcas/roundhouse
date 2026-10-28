@@ -83,7 +83,7 @@ module ActionController
         pairs << [name, value.nil? ? "nil" : value.inspect]
       end
       shown = pairs.sort_by { |pair| pair[0] }.map { |pair| "#{pair[0]}: #{pair[1]}" }.join(", ")
-      new("No route matches {#{shown}}, missing required keys: [#{missing.join(", ")}]")
+      new("No route matches {#{shown}}, missing required keys: [#{missing.sort.join(", ")}]")
     end
   end
 end

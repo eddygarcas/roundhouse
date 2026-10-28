@@ -386,12 +386,15 @@ pub fn lower_routes_to_library_functions(app: &App) -> Vec<LibraryFunction> {
 /// or empty, as Rails' router does, instead of building
 /// "/articles//comments" (roundhouse#1475). The guard is
 ///
-///     raise ActionController::UrlGenerationError.missing_segments(
-///       "comments", "create", ["article_id"], [article_id]) if article_id.to_s.empty?
+/// ```ruby
+/// raise ActionController::UrlGenerationError.missing_segments(
+///   "comments", "create", ["article_id"], [article_id]) if article_id.to_s.empty?
+/// ```
 ///
 /// with one `to_s.empty?` per required positional segment (`nil.to_s` is
-/// `""`). Optional segments keep their `nil` default. The strict targets'
-/// helpers take typed segments, so a nil can't reach them.
+/// `""`). Optional segments keep their `nil` default. A format variant
+/// (`article_comments_json_path`) takes its base route's guard. The
+/// strict targets' helpers take typed segments, so a nil can't reach them.
 pub fn guard_required_segments(funcs: &mut [LibraryFunction], app: &App) {
     let mut targets: crate::det::HashMap<String, (String, String)> = Default::default();
     for route in flatten_routes_for_helpers(app).iter().filter(|r| r.named) {
@@ -400,6 +403,14 @@ pub fn guard_required_segments(funcs: &mut [LibraryFunction], app: &App) {
         targets
             .entry(format!("{}_path", route.as_name))
             .or_insert_with(|| (controller, route.action.as_str().to_string()));
+    }
+    // A format variant is built from its base route, so it takes the same
+    // guard (CodeRabbit on #1491).
+    let declared: crate::det::HashSet<String> = targets.keys().cloned().collect();
+    for (name, (as_name, _)) in format_variant_demand(app, &declared) {
+        if let Some(target) = targets.get(&format!("{as_name}_path")).cloned() {
+            targets.entry(name).or_insert(target);
+        }
     }
     let span = Span::synthetic();
     for f in funcs.iter_mut() {
