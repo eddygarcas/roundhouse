@@ -278,14 +278,20 @@ fn store_reference(expr: &Expr) -> Option<StoreReference> {
     }
 }
 
-// Object is itself a lexical constant: a controller, enclosing namespace or
-// ancestor can bind it to another class. Ask the same source resolver used
-// for superclass/mixin lookup, at the receiver's own position. Never guess
-// the global Object when a receiver has no proven namespace answer.
+// Resolve bare constants in their written lexical nesting, before deciding
+// whether they select a boot binding. The class's qualified name alone
+// cannot distinguish `module A; class B` from `class A::B`.
+// Object is itself lexical too: resolve its receiver before using it as
+// the global Object. An unresolved binding keeps the macro's gap.
 fn resolve_store_receiver(expr: &mut Expr, resolver: &crate::analyze::ConstResolver, bindings: &StoreBindings) -> bool {
     if let ExprNode::Const { path } = &*expr.node {
         let (rooted, parts) = constant_segments(path);
-        if !rooted && parts.len() > 1 && parts[0] == "Object" {
+        if !rooted && parts.len() == 1 {
+            let Some(name) = resolver.declaration_name(expr.span, path) else { return false };
+            let mut resolved = vec![Symbol::from("")];
+            resolved.extend(name.trim_start_matches("::").split("::").map(Symbol::from));
+            expr.node = Box::new(ExprNode::Const { path: resolved });
+        } else if !rooted && parts.len() > 1 && parts[0] == "Object" {
             let receiver_span = crate::span::Span {
                 end: expr.span.start + "Object".len() as u32, ..expr.span
             };
@@ -445,8 +451,9 @@ fn depends_on_discarded_configuration(
             let (_, parts) = constant_segments(path);
             if let Some((name, prefix)) = parts.split_last() {
                 let class = crate::ident::ClassId(Symbol::from(prefix.join("::")));
-                if let Some(values) = contexts.get(&class).and_then(|c| c.constants.get(&Symbol::from(*name))) {
-                    let key = parts.join("::");
+                let key = parts.join("::");
+                if let Some(values) = contexts.get(&class).and_then(|c| c.constants.get(&Symbol::from(*name)))
+                    .or_else(|| bindings.get(&key)) {
                     if !seen.insert(key.clone()) { return true; }
                     let depends = values.iter().any(|value| depends_on_discarded_configuration(value, &class, contexts, boot, seen, resolver, bindings));
                     seen.remove(&key);

@@ -497,6 +497,41 @@ puts JSON.generate([responses, ReviewStores::FIRST.read("rate-limit:probe:127.0.
     }
 }
 
+#[test]
+fn a_bare_store_name_uses_lexical_nesting_before_ancestors_and_boot() {
+    for form in ["nested", "nested_with_ancestor", "compact"] {
+        let parent = if form == "nested_with_ancestor" {
+            "class ParentController < ActionController::API\nRATE_LIMITS = ReviewStores::FIRST\nend\n"
+        } else { "class ParentController < ActionController::API\nend\n" };
+        let source = if form == "compact" {
+            r#"class RateNamespace::ProbeController < ActionController::API
+  rate_limit to: 1, within: 60, store: RATE_LIMITS
+  def index = render plain: "ok"
+end
+"#
+        } else {
+            r#"module RateNamespace
+  class ProbeController < ::ParentController
+    rate_limit to: 1, within: 60, store: RATE_LIMITS
+    def index = render plain: "ok"
+  end
+end
+"#
+        };
+        let counts = if form == "compact" { [2, 0] } else { [0, 2] };
+        compare(&[
+            ("app/lib/rate_namespace.rb", "module RateNamespace\nRATE_LIMITS = ReviewStores::SECOND\nend\n"),
+            ("config/initializers/rate_limits.rb", "RATE_LIMITS = ReviewStores::FIRST\n"),
+            ("app/controllers/parent_controller.rb", parent),
+            ("app/controllers/rate_namespace/probe_controller.rb", source),
+        ], r#"
+responses = Array.new(2) { request_for(RateNamespace::ProbeController) }
+key = "rate-limit:rate_namespace/probe:127.0.0.1"
+puts JSON.generate([responses, ReviewStores::FIRST.read(key).to_i, ReviewStores::SECOND.read(key).to_i])
+"#, serde_json::json!([[[200,"ok"],[429,""]],counts[0],counts[1]]));
+    }
+}
+
 // Keep the unrooted regression and rooted control in the same optional
 // controller-oracle partition as every other request comparison.
 fn compare_object_store(reference: &str, expected_counts: [i32; 2]) {
@@ -556,6 +591,36 @@ fn an_unresolved_object_store_keeps_an_explicit_rate_limit_gap() {
   def index = render plain: "ok"
 end
 "#)], 0);
+}
+
+#[test]
+fn an_unresolved_bare_store_keeps_an_explicit_rate_limit_gap() {
+    assert_store_refused(&[("app/controllers/probe_controller.rb", r#"class ProbeController < ActionController::API
+  rate_limit to: 1, within: 60, store: MISSING_STORE
+  def index = render plain: "ok"
+end
+"#)], 0);
+}
+
+#[test]
+fn a_namespace_store_alias_retains_a_discarded_configuration_gap() {
+    assert_store_refused(&[
+        ("app/controllers/parent_controller.rb", r#"class ParentController < ActionController::API
+  self.cache_store = ReviewStores::FIRST
+  CAPTURED_STORE = cache_store
+end
+"#),
+        ("app/lib/rate_namespace.rb", r#"module RateNamespace
+  RATE_LIMITS = ParentController::CAPTURED_STORE
+end
+"#),
+        ("app/controllers/probe_controller.rb", r#"class ProbeController < ActionController::API
+  CAPTURED_NAMESPACE_STORE = RateNamespace::RATE_LIMITS
+  rate_limit to: 1, within: 60, store: CAPTURED_NAMESPACE_STORE
+  def index = render plain: "ok"
+end
+"#),
+    ], 0);
 }
 
 fn assert_store_refused(files: &[(&str, &str)], expected_filters: usize) {
