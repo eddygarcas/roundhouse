@@ -41,6 +41,32 @@ const SOURCE: &str = r#"class ValueIfProbe
     items[flag ? (other ? i + 2 : i + 1) : i]
   end
 
+  def setter(obj, flag, other)
+    obj.fetch(flag ? obj.value = 1 : other)
+  end
+
+  def index_setter(h, flag, other)
+    h.fetch(flag ? h[:k] = 1 : other)
+  end
+
+  def or_left(flag)
+    h = { "a" => "x" }
+    h[flag ? "a" : "b"] || "none"
+  end
+
+  def multi_index_assign(h, flag)
+    h[flag ? "a" : "b"], rest = 1, 2
+    rest
+  end
+
+  def index_assign(h, flag)
+    h[flag ? "a" : "b"] = 1
+  end
+
+  def or_assign(h, flag)
+    h[flag ? "a" : "b"] ||= 1
+  end
+
   def assigned(flag, i)
     x = flag ? i + 1 : i
     x
@@ -73,4 +99,41 @@ fn multi_line_value_if_in_index_is_parenthesized() {
 fn assignment_position_keeps_block_form() {
     let out = method_body(SOURCE, "assigned");
     assert!(out.contains("x = if flag\n"), "got:\n{out}");
+}
+
+#[test]
+fn setter_branch_keeps_block_form() {
+    for name in ["setter", "index_setter"] {
+        let out = method_body(SOURCE, name);
+        assert!(!out.contains(" ? "), "a setter must not sit inside `?:`:\n{out}");
+        assert!(out.contains("(if flag\n"), "got:\n{out}");
+    }
+}
+
+#[test]
+fn or_left_hash_index_key_is_wrapped() {
+    let out = method_body(SOURCE, "or_left");
+    assert!(!out.contains("[if "), "got:\n{out}");
+    assert!(out.contains(r#"[(flag ? "a" : "b")]"#), "got:\n{out}");
+}
+
+#[test]
+fn index_assign_key_is_wrapped() {
+    let out = method_body(SOURCE, "index_assign");
+    assert!(!out.contains("[if "), "got:\n{out}");
+    assert!(out.contains(r#"[(flag ? "a" : "b")] = "#), "got:\n{out}");
+}
+
+#[test]
+fn multi_assign_index_key_is_wrapped() {
+    let out = method_body(SOURCE, "multi_index_assign");
+    assert!(!out.contains("[if "), "got:\n{out}");
+    assert!(out.contains(r#"[(flag ? "a" : "b")]"#), "got:\n{out}");
+}
+
+#[test]
+fn or_assign_index_key_is_wrapped() {
+    let out = method_body(SOURCE, "or_assign");
+    assert!(!out.contains("[if "), "got:\n{out}");
+    assert!(out.contains(r#"[(flag ? "a" : "b")]"#), "got:\n{out}");
 }

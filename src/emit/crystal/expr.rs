@@ -227,6 +227,19 @@ fn wrap_arg(e: &Expr, s: String) -> String {
     s
 }
 
+/// A setter call (`obj.value = 1`, `h[k] = v`): an assignment that `?:`
+/// would bind wrongly. The comparison operators that end in `=` are not
+/// setters.
+fn is_setter_send(e: &Expr) -> bool {
+    match &*e.node {
+        ExprNode::Send { method, .. } => {
+            let m = method.as_str();
+            m.ends_with('=') && !matches!(m, "==" | "!=" | "<=" | ">=" | "===")
+        }
+        _ => false,
+    }
+}
+
 /// `(c ? a : b)` for an `if`/`else` whose condition and branches each
 /// render as one plain line; `None` when any part would need the block
 /// form (multi-line, empty, an `if` / rescue modifier, or a statement
@@ -246,7 +259,7 @@ fn inline_ternary(cond: &Expr, then_branch: &Expr, else_branch: &Expr) -> Option
                 | ExprNode::Next { .. }
                 | ExprNode::Break { .. }
                 | ExprNode::Raise { .. }
-        )
+        ) && !is_setter_send(x)
     };
     if is_empty_branch(else_branch) || ![cond, then_branch, else_branch].into_iter().all(plain) {
         return None;
@@ -904,7 +917,7 @@ fn emit_or_left(left: &Expr) -> String {
         if method.as_str() == "[]" && !args.is_empty() {
             let recv_ty = recv.ty.as_ref().map(unwrap_nilable_union);
             if matches!(recv_ty, Some(crate::ty::Ty::Hash { .. })) {
-                let arg_strs: Vec<String> = args.iter().map(emit_expr).collect();
+                let arg_strs: Vec<String> = args.iter().map(emit_arg).collect();
                 return format!("{}[{}]?", emit_expr(recv), arg_strs.join(", "));
             }
         }
@@ -1969,7 +1982,7 @@ fn emit_lvalue(lv: &LValue) -> String {
         LValue::Var { name, .. } => escape_ident(name.as_str()),
         LValue::Ivar { name } => format!("@{name}"),
         LValue::Attr { recv, name } => format!("{}.{name}", emit_expr(recv)),
-        LValue::Index { recv, index } => format!("{}[{}]", emit_expr(recv), emit_expr(index)),
+        LValue::Index { recv, index } => format!("{}[{}]", emit_expr(recv), emit_arg(index)),
         LValue::Const { path } => path.iter().map(|s| s.as_str().to_string()).collect::<Vec<_>>().join("::"),
     }
 }
