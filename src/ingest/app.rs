@@ -2439,6 +2439,8 @@ end
     keep_initializer_defined(&mut app, dir, &sources, initializer_defined);
     // `self.queue_adapter =` on ApplicationJob (see `App::queue_adapter`).
     apply_application_job_queue_adapter(&mut app);
+    let const_resolver = crate::timings::phase("rubydex: wait", || const_resolver.finish());
+    let (rate_limit_stores, rate_limit_store_values) = super::rate_limit::install_boot_stores(&mut app, rate_limit_stores, &const_resolver.for_sources(&sources));
     if app.queue_adapter.as_deref() == Some("sidekiq") {
         sidekiq_warnings.into_iter().for_each(warn_sidekiq);
     }
@@ -2449,8 +2451,6 @@ end
         ));
     }
     super::propshaft::ingest(vfs, dir, &mut app)?;
-    let const_resolver = crate::timings::phase("rubydex: wait", || const_resolver.finish());
-    let (rate_limit_stores, rate_limit_store_values) = super::rate_limit::install_boot_stores(&mut app, rate_limit_stores, &const_resolver.for_sources(&sources));
     // The ledger of boot statements no recognizer above read. A warning
     // per statement, in the ingest diagnostic channel; no `App` field.
     let app_namespaces: HashSet<String> = app
