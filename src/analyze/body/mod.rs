@@ -2157,7 +2157,8 @@ impl<'a> BodyTyper<'a> {
                 } else {
                     None
                 };
-                // `filter_map` drops the false an `l && r` block answers, so the result holds only `r`'s values, not the Bool of `l`
+                // `filter_map` drops the false an `l && r` block answers, so
+                // the result holds only `r`'s values, not the Bool of `l`.
                 let block_ret = match block.as_ref().map(|b| &*b.node) {
                     Some(ExprNode::Lambda { body, .. }) if method.as_str() == "filter_map" => {
                         filter_map_and_value(body).or(block_ret)
@@ -6672,15 +6673,51 @@ mod tests {
 /// block's value is something else, or `r` has no type yet.
 ///
 /// Only the `&&` at the block's tail: there `l`'s Bool can only be
-/// `false`. A block answering a plain Bool keeps its `true`s.
+/// `false`. A block answering a plain Bool keeps its `true`s. A value
+/// the block yields by `next` is an element too, so its type joins
+/// `r`'s. A `break` answers the whole call instead, so a block with one
+/// keeps its usual typing.
 fn filter_map_and_value(body: &Expr) -> Option<Ty> {
     let tail = match &*body.node {
         ExprNode::Seq { exprs } => exprs.last()?,
         _ => body,
     };
-    match &*tail.node {
-        ExprNode::BoolOp { op: crate::expr::BoolOpKind::And, right, .. } => right.ty.clone(),
-        _ => None,
+    let ExprNode::BoolOp { op: crate::expr::BoolOpKind::And, right, .. } = &*tail.node else {
+        return None;
+    };
+    let mut yielded = vec![right.ty.clone()?];
+    if !block_exits(body, &mut yielded) {
+        return None;
+    }
+    yielded.into_iter().reduce(union_of)
+}
+
+/// Collect the types of this block's `next` values (a bare `next` is
+/// nil) into `yielded`, leaving out the blocks and loops inside it,
+/// which own their `next`. `false` on a `break`, or a `next` value with
+/// no type yet.
+fn block_exits(e: &Expr, yielded: &mut Vec<Ty>) -> bool {
+    match &*e.node {
+        ExprNode::Break { .. } => false,
+        ExprNode::Next { value } => match value {
+            None => {
+                yielded.push(Ty::Nil);
+                true
+            }
+            Some(v) => match &v.ty {
+                Some(ty) => {
+                    yielded.push(ty.clone());
+                    block_exits(v, yielded)
+                }
+                None => false,
+            },
+        },
+        ExprNode::Lambda { .. } | ExprNode::While { .. } => true,
+        _ => {
+            let mut ok = true;
+            e.node.for_each_child(&mut |child| ok &= block_exits(child, yielded));
+            ok
+        }
     }
 }
 
