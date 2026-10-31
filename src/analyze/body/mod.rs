@@ -2157,6 +2157,13 @@ impl<'a> BodyTyper<'a> {
                 } else {
                     None
                 };
+                // `filter_map` drops the false an `l && r` block answers, so the result holds only `r`'s values, not the Bool of `l`
+                let block_ret = match block.as_ref().map(|b| &*b.node) {
+                    Some(ExprNode::Lambda { body, .. }) if method.as_str() == "filter_map" => {
+                        filter_map_and_value(body).or(block_ret)
+                    }
+                    _ => block_ret,
+                };
                 if recv_ty.as_ref() == Some(&Ty::Str) && method.as_str() == "bytes"
                     && let Some(b) = block.as_ref()
                     && let ExprNode::Lambda { body, .. } = &*b.node
@@ -6655,6 +6662,25 @@ mod tests {
                 "{method} block return must not inherit the enclosing Hash return"
             );
         }
+    }
+}
+
+/// The type a `filter_map` block keeps when its value is `l && r`.
+/// Whatever stops the `&&` is falsy (`nil` or `false`), and
+/// `filter_map` drops it, so only `r`'s type reaches the result. The
+/// caller strips `r`'s nil as for any `filter_map`. `None` when the
+/// block's value is something else, or `r` has no type yet.
+///
+/// Only the `&&` at the block's tail: there `l`'s Bool can only be
+/// `false`. A block answering a plain Bool keeps its `true`s.
+fn filter_map_and_value(body: &Expr) -> Option<Ty> {
+    let tail = match &*body.node {
+        ExprNode::Seq { exprs } => exprs.last()?,
+        _ => body,
+    };
+    match &*tail.node {
+        ExprNode::BoolOp { op: crate::expr::BoolOpKind::And, right, .. } => right.ty.clone(),
+        _ => None,
     }
 }
 
