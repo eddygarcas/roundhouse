@@ -220,9 +220,10 @@ pub fn emit(app: &App) -> Vec<EmittedFile> {
     let route_helper_funcs_for_extras = crate::lower::lower_routes_to_library_functions(app);
     let route_helper_extras = crate::lower::extras_from_funcs(&route_helper_funcs_for_extras);
 
-    let (model_lcs, model_registry) = crate::lower::lower_models_with_registry_and_params(
+    let (model_lcs, model_registry) = crate::lower::lower_models_with_registry_params_and_views(
         &app.models,
         &app.schema,
+        &app.views,
         view_extras,
         &params_specs,
     );
@@ -495,6 +496,7 @@ pub fn emit(app: &App) -> Vec<EmittedFile> {
             &app.models,
             test_extras,
             &crate::lower::routes::helper_id_segments(app),
+            &crate::lower::routes::direct_helper_names(app),
         );
         for lowered in &test_lowered {
             let lc = &lowered.test_class;
@@ -681,10 +683,8 @@ fn emit_main_cr(app: &App) -> EmittedFile {
     s.push_str("  controllers: {\n");
     for c in &app.controllers {
         let class_name = c.name.0.as_str();
-        let stem = crate::naming::snake_case(
-            class_name.strip_suffix("Controller").unwrap_or(class_name),
-        );
-        writeln!(s, "    :{} => {},", stem, class_name).unwrap();
+        // Not the class's own snake_case: the router looks a controller up by its route symbol (`:admin__posts`).
+        writeln!(s, "    :{} => {},", controller_symbol(class_name), class_name).unwrap();
     }
     s.push_str("  } of Symbol => ActionController::Base.class,\n");
     s.push_str(")\n");
@@ -782,7 +782,7 @@ fn emit_test_setup_cr(
 /// `src/lower/routes_to_library/mod.rs::controller_symbol`.
 fn controller_symbol(class_name: &str) -> String {
     let base = class_name.strip_suffix("Controller").unwrap_or(class_name);
-    crate::naming::underscore(base).replace('/', "_")
+    crate::naming::underscore(base).replace('/', "__")
 }
 
 fn emit_app_cr(emitted: &[EmittedFile]) -> EmittedFile {
@@ -796,6 +796,10 @@ fn emit_app_cr(emitted: &[EmittedFile]) -> EmittedFile {
         "param_value",
         "hash_with_indifferent_access",
         "inflector",
+        // Ruby's core error classes (`NoMethodError`, `NameError`): errors
+        // subclasses them (`ActiveModel::UnknownAttributeError <
+        // NoMethodError`), and a superclass resolves at parse time.
+        "core_errors",
         // active_record_base → errors keeps the forward-ref chain
         // resolvable at parse time. Base is referenced by errors'
         // RecordInvalid as a property type (parse-time class macro);

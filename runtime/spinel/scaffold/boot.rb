@@ -72,6 +72,8 @@ require_relative "runtime/active_support_duration"
 require_relative "runtime/active_support_ext"
 require_relative "runtime/active_model_validator"
 require_relative "runtime/rails"
+# Not part of runtime/rails: the instrumented Notifications paths keep per-thread state the strict targets' typing gate does not follow.
+require_relative "runtime/active_support_instrumentation"
 # `ActiveSupport::Cache::MemoryStore` (a `Rails::Cache`) and
 # `ActiveSupport::Cache.expand_cache_key`.
 require_relative "runtime/active_support_cache"
@@ -193,6 +195,9 @@ require_relative "runtime/thread_state"
 # overlay replaces it with a thread-variable memo + String.new(capacity:).
 require_relative "runtime/view_buffer_cap"
 require_relative "runtime/tep/tep"
+# Gem packages (runtime/gems/<gem>/) load right after this line, which
+# `project::apply_gem_packages` finds: they register their hooks here.
+require_relative "runtime/request_hooks"
 # Spinel-only CGI reopen: `require "cgi"` reaches spinel's bundled package
 # and this adds `parse`, which upstream moved to `cgi/core`. CRuby/JRuby use
 # the stdlib. No longer needs to follow tep — the escapes were routed to
@@ -288,6 +293,8 @@ require_relative "runtime/action_controller_fragment_caching"
 # Rails 8.1.4's full ActionController::Head options hash is a Ruby-family
 # feature; strict non-Ruby targets keep the bounded shared implementation.
 require_relative "runtime/action_controller_head"
+# Rails' FlashHash keeps any key; the shared Flash keeps notice/alert, which every target can type.
+require_relative "runtime/flash_any_key"
 # Rails 8.1.4 `send_data(filename:)`: the Content-Disposition escaping
 # works over UTF-8 bytes, so it is a Ruby-family reopen as well.
 require_relative "runtime/action_controller_send_data"

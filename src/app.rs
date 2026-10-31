@@ -86,6 +86,25 @@ pub struct App {
     /// otherwise → here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub library_classes: Vec<LibraryClass>,
+    /// Framework calls still use their lowered ABI; native argument
+    /// preservation requires a source library declaration.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_library_keywords: bool,
+    /// Each gem-source file whose top level runs more than declarations
+    /// when Ruby loads it (`ingest::library_class::file_program`): its
+    /// declarations, statements and requires, in source order. The Ruby
+    /// family emits each as one file (`app/models/roundhouse_files/…`),
+    /// loaded where a carried file requires it, else at boot when
+    /// Bundler requires its gem.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_programs: Vec<FileProgram>,
+    /// The gem-source files the boot loads, in load order: a literal
+    /// `require` in config/boot.rb, application.rb or environment.rb,
+    /// and `Bundler.require`'s entry file of each PATH or source gem
+    /// (`lib/<name>.rb`, or what the Gemfile's `require:` names); then
+    /// the gem files an app support file requires, as it loads at boot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boot_gem_entries: Vec<String>,
     pub controllers: Vec<Controller>,
     pub routes: RouteTable,
     pub views: Vec<View>,
@@ -166,6 +185,12 @@ pub struct App {
     /// when it lists none.
     #[serde(default, skip_serializing_if = "crate::extensions::Extensions::is_empty")]
     pub extensions: crate::extensions::Extensions,
+    /// `roundhouse.yml`'s `spinel.int_overflow` (`promote`, `wrap`), handed
+    /// to Spinel as `--int-overflow`. Provisional: an app should not have
+    /// to choose this, and the setting is to go once the need is decided
+    /// without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spinel_int_overflow: Option<String>,
     /// Attributes the app (and its gems) add to Action Text's sanitizer
     /// allow-list at boot — `ActionText::ContentHelper.allowed_attributes`
     /// as the initializers leave it, minus the framework defaults the
@@ -446,6 +471,10 @@ pub struct App {
     /// Object, which the emitted app does not define.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub initializer_defs: Vec<crate::ident::Symbol>,
+    /// Literal settings on a gem package's config receiver, from
+    /// `config/initializers/` (`ingest::gem_package_settings`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gem_package_settings: Vec<GemPackageSetting>,
     /// Installed gems compiled from source because the app's code needs
     /// them and nothing models or ports them (`ingest::auto_source_gems`).
     /// The Spinel tree carries their code; the ruby family loads the real
@@ -506,6 +535,16 @@ pub struct App {
     /// `analyze::database_identity`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub database_refusals: Vec<crate::database::DatabaseRefusal>,
+    /// Support files (`lib/`, a gem's source, …) whose class ingest
+    /// failed, each at the construct that failed it: the walk goes on
+    /// without the file, and `analyze` reports it there
+    /// (`error[ingest_unsupported]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ingest_drops: Vec<IngestDrop>,
+    /// Each support file (`lib/`, a gem's source, …) with the classes and
+    /// modules it declares outside a load-time conditional, by source path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub library_class_files: Vec<(String, Vec<ClassId>)>,
     /// The app's `Rails::Application` subclass from
     /// `config/application.rb` (e.g. `Lobsters::Application`),
     /// reparented at ingest onto `Rails::Application` itself. Its
@@ -834,6 +873,15 @@ pub struct CollectionCacheStore {
     pub reader: Symbol,
 }
 
+/// `Rack::MiniProfiler.config.position = "bottom-left"`, kept as written.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GemPackageSetting {
+    pub gem: String,
+    pub setter: String,
+    pub statement: String,
+    pub span: crate::span::Span,
+}
+
 /// `X.before_action :m, only: [:a, …]` from a `config/initializers/`
 /// file. `only` empty means every action, as Rails reads it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1111,6 +1159,9 @@ impl App {
             i18n_table_sites: Vec::new(),
             models: Vec::new(),
             library_classes: Vec::new(),
+            native_library_keywords: false,
+            file_programs: Vec::new(),
+            boot_gem_entries: Vec::new(),
             controllers: Vec::new(),
             routes: RouteTable::default(),
             views: Vec::new(),
@@ -1128,6 +1179,7 @@ impl App {
             assume_ssl_envs: Vec::new(),
             gem_boundary: Default::default(),
             extensions: Default::default(),
+            spinel_int_overflow: None,
             content_helper_allowed_attributes: Vec::new(),
             content_helper_allowed_tags: Vec::new(),
             inferred_method_params: HashMap::default(),
@@ -1156,6 +1208,7 @@ impl App {
             rake_task_gaps: Vec::new(),
             initializer_filters: Vec::new(),
             initializer_defs: Vec::new(),
+            gem_package_settings: Vec::new(),
             auto_source_gems: Vec::new(),
             initializer_response_headers: Vec::new(),
             collection_cache_store: None,
@@ -1165,6 +1218,8 @@ impl App {
             databases: Vec::new(),
             model_databases: indexmap::IndexMap::new(),
             database_refusals: Vec::new(),
+            ingest_drops: Vec::new(),
+            library_class_files: Vec::new(),
             rails_application: None,
             concern_filters: HashMap::default(),
             graphql_types: Vec::new(),
@@ -1287,4 +1342,56 @@ pub struct ValidatesWithGuard {
     pub file: u32,
     pub start: u32,
     pub class: String,
+}
+
+/// A gem-source file's file-level program ([`App::file_programs`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FileProgram {
+    /// The source file, as ingested.
+    pub source: String,
+    pub items: Vec<ProgramItem>,
+}
+
+/// One top-level statement of a [`FileProgram`], in source order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ProgramItem {
+    /// A `class`/`module` the library-class walk carried (these names),
+    /// loaded here so the statements around it run in order.
+    Declared(Vec<crate::ident::ClassId>),
+    /// A statement Ruby runs as the file loads.
+    Statement(crate::expr::Expr),
+    /// `require "feature"` / `require_relative "path"`, resolved against
+    /// the tree when emitted.
+    Require { span: crate::span::Span, feature: String, relative: bool },
+    /// Modules the file opens that this file's emitted declarations do
+    /// not (a namespace that holds only autoloads, or nested modules),
+    /// each as its nesting is written: `(segment, is_class)` from the
+    /// outermost (`module Ak; class Client; module Schema`). Opened here,
+    /// so the constant exists as the source's lines make it.
+    Opened(Vec<Vec<(String, bool)>>),
+    /// `autoload :Name, "feature"` in `owner`'s body (`Object` at the
+    /// top level): Ruby loads the file the first time `owner::Name` is
+    /// read.
+    Autoload { span: crate::span::Span, owner: String, name: String, feature: String },
+    /// A file-level `if`/`unless` holding declarations: its branches'
+    /// items run only where Ruby runs the branch (an `elsif` is a branch
+    /// in the `else` items).
+    Branch {
+        condition: crate::expr::Expr,
+        negated: bool,
+        then_items: Vec<ProgramItem>,
+        else_items: Vec<ProgramItem>,
+    },
+    /// A statement the ingest cannot carry, reported as
+    /// `file_statement_unsupported` and named when the file loads.
+    NotCarried { span: crate::span::Span, message: String },
+}
+
+/// A support file the class ingest left out (`App::ingest_drops`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct IngestDrop {
+    /// The construct that failed it; the file's start when no frame
+    /// noted one.
+    pub span: crate::span::Span,
+    pub message: String,
 }

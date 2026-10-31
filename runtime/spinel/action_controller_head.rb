@@ -5,47 +5,63 @@
 # in runtime/ruby/action_controller/base.rb.
 module ActionController
   class Base
+    # Rails' `redirect_to …, flash: { error: … }`: any key, set after
+    # notice/alert as `flash.update` does. The strict targets' shared
+    # redirect_to keeps notice/alert only, as their Flash does.
+    def redirect_to(path, notice: nil, alert: nil, status: :found, flash: nil)
+      loc = ActionController.sanitize_location(path)
+      loc = absolute_redirect_location(loc)
+      loc = same_host_location(loc)
+      @_location = loc
+      @_status   = resolve_status(status)
+      @_performed = true
+      @flash[:notice] = notice unless notice.nil?
+      @flash[:alert]  = alert  unless alert.nil?
+      flash&.each { |key, value| @flash[key] = value }
+      nil
+    end
+
     def head(status, options = nil)
       if status.is_a?(Hash)
         raise ArgumentError, "#{status.inspect} is not a valid value for `status`."
       end
-      raise AbstractController::DoubleRenderError if @performed
+      raise AbstractController::DoubleRenderError if @_performed
 
       status = :ok if status.nil?
       status_code = head_status_code(status)
       content_type = +""
       content_type = head_option_content_type(options[:content_type]) unless options.nil?
 
-      @status = status_code
+      @_status = status_code
       unless options.nil?
         location = options.delete(:location)
         options.delete(:content_type)
         options.each do |key, value|
-          @headers[normalize_head_header_name(key.to_s)] = value.to_s
+          @_headers[normalize_head_header_name(key.to_s)] = value.to_s
         end
         unless location.nil?
           resolved_location = ActionView::ViewHelpers.url_for(location).to_s
-          @location = ActionController.sanitize_location(resolved_location)
+          @_location = ActionController.sanitize_location(resolved_location)
         end
       end
 
-      if head_includes_content?(@status)
-        if !@content_type_explicit || media_type.empty?
-          @content_type = content_type.empty? ? head_format_content_type : content_type
+      if head_includes_content?(@_status)
+        if !@_content_type_explicit || media_type.empty?
+          @_content_type = content_type.empty? ? head_format_content_type : content_type
         end
-        @content_type = media_type
+        @_content_type = media_type
       else
-        @content_type = ""
+        @_content_type = ""
       end
 
-      @body = +""
-      @performed = true
-      @head_response = true
+      @_body = +""
+      @_performed = true
+      @_head_response = true
       true
     end
 
     def head_response?
-      @head_response
+      @_head_response
     end
 
     # Render, redirect_to and head share Rails' Integer status pass-through.

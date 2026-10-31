@@ -151,7 +151,7 @@ fn build_route_new(r: &FlatRoute, class_id: &ClassId, route_ty: &Ty) -> Expr {
     let controller_sym = controller_symbol(r.controller.0.as_str());
     let mut args = vec![
         lit_str(verb_str.to_string()),
-        lit_str(r.path.clone()),
+        lit_str(crate::lower::segment_pattern::dispatch_path(&r.path, &r.seg_patterns)),
         lit_sym(Symbol::from(controller_sym)),
         lit_sym(r.action.clone()),
     ];
@@ -218,13 +218,14 @@ fn build_route_new(r: &FlatRoute, class_id: &ClassId, route_ty: &Ty) -> Expr {
 
 /// `ArticlesController` → `articles` (the controller-symbol form
 /// the spinel router uses). Mirrors the existing per-target convention.
-/// Namespaced controllers flatten with underscores
-/// (`Mod::ActivitiesController` → `mod_activities`) — a plain-ident
+/// Namespaced controllers flatten with a double underscore
+/// (`Mod::ActivitiesController` → `mod__activities`) — a plain-ident
 /// symbol every target's symbol literal can carry (`:mod::activities`
 /// parses as scope resolution, not a symbol, under Ruby).
+// Not a single underscore: lobsters' `Mod::MailsController` and top-level `ModMailsController` both flattened to `mod_mails`, and /mod/mails/* dispatched to the wrong one.
 pub(crate) fn controller_symbol(class_name: &str) -> String {
     let base = class_name.strip_suffix("Controller").unwrap_or(class_name);
-    crate::naming::underscore(base).replace('/', "_")
+    crate::naming::underscore(base).replace('/', "__")
 }
 
 /// Build the `RouteHelpers` module from `app.routes` as a list of
@@ -348,7 +349,17 @@ pub fn lower_routes_to_library_functions(app: &App) -> Vec<LibraryFunction> {
     // `direct :name do … end` helpers — not routes, so they never reach
     // `flat`; they ride here because they live in the same module and
     // their `route_for` bodies need the flattened table to resolve.
-    funcs.extend(direct::lower_direct_helpers(&module_path, app, &flat));
+    // A `route_for` argument meets its target's signature the way any
+    // other call site does, so the generated helpers' parameter types go
+    // with it.
+    let helper_params: crate::det::HashMap<String, Vec<Ty>> = funcs
+        .iter()
+        .filter_map(|f| match &f.signature {
+            Some(Ty::Fn { params, .. }) => Some((f.name.as_str().to_string(), params.iter().map(|p| (*p.ty).clone()).collect())),
+            _ => None,
+        })
+        .collect();
+    funcs.extend(direct::lower_direct_helpers(&module_path, app, &flat, &helper_params));
     // The `**hash` half of the query string. `query_keys` above covers
     // every key a call site NAMES; a call site that splats a runtime
     // Hash names none, and there is nothing static to read them off —
@@ -853,7 +864,8 @@ fn build_url_options_function(
 /// `/domains/:id => home#for_domain, as: "domain"`), so the helper's
 /// own name is the fallback resource lookup (`domain_path` → Domain).
 fn model_overrides_to_param(controller: &str, helper_name: &str, app: &App) -> bool {
-    let from_controller = crate::naming::singularize(&controller_symbol(controller));
+    let base = controller.strip_suffix("Controller").unwrap_or(controller);
+    let from_controller = crate::naming::singularize(&crate::naming::underscore(base).replace('/', "_"));
     if named_model_overrides_to_param(&from_controller, app) {
         return true;
     }
@@ -1446,8 +1458,12 @@ fn string_segment_demand(
                         .unwrap_or_else(|| method.as_str().to_string());
                     for (i, arg) in positional.iter().enumerate() {
                         let Some(seg) = segments.get(i) else { break };
-                        let string_record = matches!(&arg.ty, Some(Ty::Class { id, .. }) if string_keyed.contains(id.0.as_str()));
-                        if matches!(arg.ty, Some(Ty::Str)) || string_record {
+                        // A String that can be nil (a nullable column read off a
+                        // record that can be nil, `note.route_param`) is the same
+                        // evidence: Rails writes either with `to_param`.
+                        let arg_ty = arg.ty.as_ref().map(Ty::peel_nilable);
+                        let string_record = matches!(arg_ty, Some(Ty::Class { id, .. }) if string_keyed.contains(id.0.as_str()));
+                        if matches!(arg_ty, Some(Ty::Str)) || string_record {
                             out.entry(helper.clone()).or_default().insert(seg.clone());
                         }
                     }
@@ -1509,7 +1525,7 @@ fn route_for_string_segments(
                         .enumerate()
                     {
                         let Some(seg) = segments.get(i) else { break };
-                        if matches!(arg.ty, Some(Ty::Str)) {
+                        if matches!(arg.ty.as_ref().map(Ty::peel_nilable), Some(Ty::Str)) {
                             out.entry(helper.clone()).or_default().insert(seg.clone());
                         }
                     }
@@ -1683,7 +1699,12 @@ fn format_variant_demand(
             declared: &crate::det::HashSet<String>,
             out: &mut std::collections::BTreeMap<String, (String, String)>,
         ) {
-            if let ExprNode::Send { recv: None, method, .. } = &*e.node {
+            // Only a call the `format:` lowering renamed. Any other
+            // `<route>_<word>_url` is the app's own method (`widget_from_url`
+            // in a class that defines it), or no helper at all in Rails.
+            if let ExprNode::Send { recv: None, method, .. } = &*e.node
+                && e.decisions & crate::expr::FORMAT_VARIANT_CALL != 0
+            {
                 let raw = method.as_str();
                 if let Some(stem) = raw.strip_suffix("_path").or_else(|| raw.strip_suffix("_url")) {
                     // A real helper of that name wins — never shadow a

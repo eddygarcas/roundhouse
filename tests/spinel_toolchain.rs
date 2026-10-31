@@ -32,6 +32,10 @@ use roundhouse::ingest::ingest_app;
 
 #[path = "support/emit_and_run.rs"]
 mod emit_and_run;
+#[path = "support/time_change_usec.rs"]
+mod time_change_usec_contract;
+#[path = "spinel_toolchain/time_change_usec.rs"]
+mod time_change_usec;
 #[path = "support/string_truncate.rs"]
 mod string_truncate;
 #[path = "spinel_toolchain/string_truncate.rs"]
@@ -128,6 +132,8 @@ mod strong_params;
 mod params_wrapper;
 #[path = "spinel_toolchain/json_request_values.rs"]
 mod json_request_values;
+#[path = "spinel_toolchain/multipart_file_parts.rs"]
+mod multipart_file_parts;
 #[path = "support/default_format_dispatch.rs"]
 mod default_format_dispatch;
 #[path = "spinel_toolchain/route_default_format.rs"]
@@ -358,7 +364,7 @@ fn the_rails_health_check_answers_up_natively() {
         .run_spinel(r#"
 routed = false
 RouteTable.table.each do |route|
-  routed = true if route.verb == "GET" && route.pattern == "/up" && route.controller == :rails_health && route.action == :show
+  routed = true if route.verb == "GET" && route.pattern == "/up" && route.controller == :rails__health && route.action == :show
 end
 raise "no GET /up route to rails_health#show" unless routed
 c = Rails::HealthController.new
@@ -370,7 +376,7 @@ puts "rails health contract passed"
     run.assert_passes();
     assert!(run.stdout.contains("rails health contract passed"));
     let main = std::fs::read_to_string(run.emitted.join("main.rb")).expect("main.rb");
-    assert!(main.contains("when :rails_health then Rails::HealthController.new"), "{main}");
+    assert!(main.contains("when :rails__health then Rails::HealthController.new"), "{main}");
 }
 
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -717,3 +723,6 @@ puts "named captures passed"
     run.assert_passes();
     assert!(run.stdout.contains("named captures passed"));
 }
+
+#[path = "spinel_toolchain/db_binary_literal.rs"]
+mod db_binary_literal;
