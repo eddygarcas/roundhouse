@@ -36,6 +36,20 @@ fn an_app_ivar_shadowing_base_state_is_renamed_in_the_controller() {
     assert!(probes.contains("this.app_location, this.app_status"), "{probes}");
 }
 
+/// A runtime member is matched by the name the TypeScript emit gives it:
+/// `performed?` is `is_performed()` there, so an app `@is_performed`
+/// collides with it as much as `@status` does with `status`.
+#[test]
+fn an_app_ivar_named_like_a_sanitized_base_method_is_renamed() {
+    let (emitted, errors) = ts_controller_ivars::overlay().emit(BuildTarget::Typescript);
+    assert!(errors.is_empty(), "{errors:?}");
+    let probes = std::fs::read_to_string(emitted.join("app/controllers/probes_controller.ts")).unwrap();
+    assert!(!probes.contains("declare is_performed:"), "{probes}");
+    assert!(probes.contains("declare app_is_performed: string;"), "{probes}");
+    assert!(probes.contains("this.app_is_performed = \"app flag\";"), "{probes}");
+    assert!(probes.contains("if (this.is_performed()) { return null; }"), "{probes}");
+}
+
 /// An ivar that names no runtime member keeps its name.
 #[test]
 fn an_ivar_naming_no_base_member_keeps_its_name() {

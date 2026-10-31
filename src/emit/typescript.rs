@@ -3134,8 +3134,10 @@ pub fn emit_method(m: &crate::dialect::MethodDef) -> String {
 /// the app's `status` overrode the runtime's field, which `tsc` refused
 /// (TS2416), and even where the types agree the two would be one value.
 ///
-/// The names come from the runtime's own `Base`: its methods and the ivars
-/// its bodies use, so a runtime change can't leave one out. One rename map
+/// The names come from the runtime's own `Base`: its methods, by their Ruby
+/// name and the name the class emit gives them (`performed?` is
+/// `is_performed()`), and the ivars its bodies use, so a runtime change
+/// can't leave one out. One rename map
 /// covers every app controller, so an ivar ApplicationController sets and a
 /// subclass reads keeps one name. The new name (`app_<name>`, numbered if
 /// taken) is checked against the runtime's members and every controller's
@@ -3188,9 +3190,13 @@ fn rename_ivars_shadowing_controller_base(
 
     const BASE: &str = "ActionController::Base";
     let mut taken: crate::det::HashSet<Symbol> = crate::det::HashSet::default();
+    // A method is taken under the name the class emit writes for it too:
+    // `performed?` is `is_performed()` in TypeScript, `save!` is
+    // `save_bang()`, `name=` is `set_name()`.
+    let method_names = |name: &Symbol| [name.clone(), Symbol::from(library::sanitize_identifier(name.as_str()))];
     for class in runtime.iter().filter(|c| c.name.0.as_str() == BASE) {
         for m in &class.methods {
-            taken.insert(m.name.clone());
+            taken.extend(method_names(&m.name));
             ivars_in(&m.body, &mut taken);
         }
     }
@@ -3221,7 +3227,7 @@ fn rename_ivars_shadowing_controller_base(
     let mut app_ivars: crate::det::HashSet<Symbol> = crate::det::HashSet::default();
     for &i in &controller_idx {
         for m in &controllers[i].methods {
-            taken.insert(m.name.clone());
+            taken.extend(method_names(&m.name));
             ivars_in(&m.body, &mut app_ivars);
         }
     }

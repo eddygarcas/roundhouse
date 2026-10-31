@@ -2,6 +2,8 @@
 //! `ActionController::Base`'s own state: `@status` set by the
 //! controller's `before_action`, `@location` by ApplicationController's,
 //! `@headers` by an included concern, all rendered by the view (#1614).
+//! `@is_performed` is named like the runtime's `performed?` as the
+//! TypeScript emit spells it (`is_performed()`).
 
 use super::emit_and_run::{self, Overlay};
 
@@ -42,6 +44,7 @@ pub const PROBES_CONTROLLER: &str = "class ProbesController < ApplicationControl
 
   def set_status
     @status = \"app status\"
+    @is_performed = \"app flag\"
   end
 end
 ";
