@@ -89,3 +89,12 @@ fn a_controller_including_a_reopened_gem_module_gets_both_openings() {
         assert!(!source.contains("\"gem label\""), "{source}");
     }
 }
+
+/// A gem module whose own opening is empty is still the gem's, so the
+/// initializer's opening is kept.
+#[test]
+fn a_gem_module_declared_empty_keeps_the_initializers_methods() {
+    let source = std::fs::read_to_string(contract::empty_module_app().emit(BuildTarget::Spinel).0.join("app/models/shelf/hooks.rb"))
+        .expect("app/models/shelf/hooks.rb");
+    assert!(source.contains("def self.hook"), "{source}");
+}

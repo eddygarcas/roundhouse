@@ -208,3 +208,35 @@ pub fn included_module_lib_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_tagging.rb", "require Rails.root.join(\"lib/shelf_tagging\").to_s\n")
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
+
+/// A gem module with an empty body.
+pub const SHELF_HOOKS: &str = r##"module Shelf
+  module Hooks
+  end
+end
+"##;
+
+pub const HOOKS_REOPEN: &str = r##"module Shelf
+  module Hooks
+    def self.hook
+      "hooked"
+    end
+  end
+end
+"##;
+
+pub const HOOK_PROBE: &str = r##"class HookProbe
+  def self.describe
+    Shelf::Hooks.hook
+  end
+end
+"##;
+
+/// An initializer adding a method to a module the gem declares empty.
+/// Ruby answers `"hooked"` for `HookProbe.describe`.
+#[allow(dead_code)]
+pub fn empty_module_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_HOOKS)
+        .write("config/initializers/shelf_hooks.rb", HOOKS_REOPEN)
+        .write("app/models/hook_probe.rb", HOOK_PROBE)
+}
