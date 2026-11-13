@@ -263,10 +263,18 @@ pub(super) const FRAMEWORK_ROOTS: &[&str] = &[
 /// into `rails dbconsole`) out of the tree. Core classes and framework
 /// roots are never taken from here: a top-level definition of one is a
 /// reopen of something the runtime already provides.
+///
+/// A reopen of a class or module a gem compiled from source declares
+/// (`class Rack::Attack` / `class Request` adding the methods the app's
+/// throttles call) is kept whatever its name, beside the gem's opening:
+/// Bundler loads the gem before Rails runs the initializer, so the class
+/// holds both, and a method both define is the initializer's. The emit
+/// writes the openings into one file, the gem's first.
 fn keep_initializer_defined(
     app: &mut App,
     dir: &Path,
     sources: &[crate::span::SourceFile],
+    gem_mounts: &[PathBuf],
     candidates: Vec<LibraryClass>,
 ) {
     const CORE: &[&str] = &[
@@ -302,8 +310,17 @@ fn keep_initializer_defined(
             })
         })
     };
+    let from_gem = |lc: &LibraryClass| {
+        opening_file(lc, sources).is_some_and(|file| gem_mounts.iter().any(|mount| Path::new(file).starts_with(mount)))
+    };
+    let gem_declared: HashSet<String> =
+        app.library_classes.iter().filter(|c| from_gem(c)).map(|c| c.name.0.as_str().to_string()).collect();
     for lc in candidates {
         let name = lc.name.0.as_str().to_string();
+        if gem_declared.contains(&name) {
+            app.library_classes.push(lc);
+            continue;
+        }
         if name.contains("::")
             || FRAMEWORK_ROOTS.contains(&name.as_str())
             || CORE.contains(&name.as_str())
@@ -316,6 +333,18 @@ fn keep_initializer_defined(
         }
         app.library_classes.push(lc);
     }
+}
+
+/// The file an opening was read from: the first of its spans that points
+/// at a source.
+fn opening_file<'s>(lc: &LibraryClass, sources: &'s [crate::span::SourceFile]) -> Option<&'s str> {
+    let span = std::iter::once(lc.parent_span)
+        .chain(lc.include_spans.iter().copied())
+        .chain(lc.constants.iter().map(|(_, v)| v.span))
+        .chain(lc.methods.iter().map(|m| m.body.span))
+        .chain(lc.unknown_calls.iter().map(|c| c.span))
+        .find(|s| !s.is_synthetic())?;
+    sources.get((span.file.0 as usize).checked_sub(1)?).map(|f| f.path.as_str())
 }
 
 /// Admission is based on the callable retained from app source, not a target's
@@ -2995,7 +3024,8 @@ end
     let observed: crate::det::HashSet<PathBuf> =
         enum_input_files.iter().chain(boot_files.iter()).cloned().collect();
     enum_constants.validate_consumed_sources(&app, &sources, &observed)?;
-    keep_initializer_defined(&mut app, dir, &sources, initializer_defined);
+    let gem_mounts: Vec<PathBuf> = source_gems.iter().map(|gem| gem.mount.clone()).collect();
+    keep_initializer_defined(&mut app, dir, &sources, &gem_mounts, initializer_defined);
     // `self.queue_adapter =` on ApplicationJob (see `App::queue_adapter`).
     apply_application_job_queue_adapter(&mut app);
     let const_resolver = crate::timings::phase("rubydex: wait", || const_resolver.finish());
