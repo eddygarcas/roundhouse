@@ -51,3 +51,25 @@ fn the_spinel_emit_compiles_the_gem_class_a_constant_only_reopen_names() {
     }
     assert!(source.find("def self.kind").unwrap() < source.find("LIMIT = 3").unwrap(), "{source}");
 }
+
+/// A reopen written in an initializer, run on the Ruby family with the gem
+/// listed: the gem's methods and the initializer's, the initializer's
+/// `label` winning.
+#[test]
+fn a_gem_class_reopened_in_an_initializer_answers_the_gems_methods_and_the_apps() {
+    contract::listed(contract::initializer_app()).run_ruby(contract::LOCAL_ASSERTIONS).assert_passes();
+}
+
+/// On Spinel the initializer's opening is emitted after the gem's, in the
+/// same file, in the nested form and in the compact one.
+#[test]
+fn the_spinel_emit_keeps_a_gem_class_reopened_in_an_initializer() {
+    for app in [contract::initializer_app(), contract::compact_initializer_app()] {
+        let source = shelf_box(app);
+        let at = |needle: &str| source.find(needle).unwrap_or_else(|| panic!("{needle:?} in\n{source}"));
+        let (kind, local) = (at("def self.kind"), at("def self.local_tag"));
+        let gem_label = at("\"shelf box\"");
+        let app_label = at("\"app box\"");
+        assert!(kind < local && gem_label < app_label, "{source}");
+    }
+}

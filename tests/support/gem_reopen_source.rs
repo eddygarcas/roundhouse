@@ -36,6 +36,18 @@ pub const LOCAL: &str = r##"module Shelf
 end
 "##;
 
+/// [`LOCAL`] in the compact form, as an initializer often writes it.
+pub const LOCAL_COMPACT: &str = r##"class Shelf::Box
+  def self.local_tag
+    "local"
+  end
+
+  def self.label
+    "app box"
+  end
+end
+"##;
+
 /// Adds only a constant and an `include`, no method.
 pub const EXTRAS: &str = r##"module Shelf
   class Box
@@ -117,4 +129,21 @@ pub fn extras_app() -> emit_and_run::Overlay {
         .write("lib/shelf_box_extras.rb", EXTRAS)
         .write("config/initializers/shelf_box_extras.rb", "require Rails.root.join(\"lib/shelf_box_extras\").to_s\n")
         .write("app/models/box_limits.rb", BOX_LIMITS)
+}
+
+/// The reopen written in the initializer itself rather than in `lib/`:
+/// Rails runs it at boot, after Bundler has loaded the gem.
+#[allow(dead_code)]
+pub fn initializer_app() -> emit_and_run::Overlay {
+    with_gem()
+        .write("config/initializers/shelf_box.rb", LOCAL)
+        .write("app/models/article_box.rb", ARTICLE_BOX)
+}
+
+/// [`initializer_app`] with the reopen in the compact `class Shelf::Box` form.
+#[allow(dead_code)]
+pub fn compact_initializer_app() -> emit_and_run::Overlay {
+    with_gem()
+        .write("config/initializers/shelf_box.rb", LOCAL_COMPACT)
+        .write("app/models/article_box.rb", ARTICLE_BOX)
 }
