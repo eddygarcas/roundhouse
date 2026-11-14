@@ -125,12 +125,11 @@ fn a_conditional_reopen_does_not_replace_the_gems_method_in_the_controller() {
     assert!(!source.contains("\"app label\""), "{source}");
 }
 
-/// A known limit, pinned: with the condition true Ruby answers
-/// `"gem / local / app label"`, but the splice runs before load-time
-/// conditionals are settled, so a conditional `label` never replaces the
-/// gem's there. Settling them before the splice would lift it.
+/// With the constant true Ruby answers `"gem / local / app label"`, but a
+/// constant's value is not known where the reopen is spliced: a `label`
+/// defined under it does not replace the gem's.
 #[test]
-fn a_conditional_reopen_with_a_true_flag_keeps_the_gems_method_until_conditionals_settle_before_the_splice() {
+fn a_conditional_reopen_on_a_constants_value_keeps_the_gems_method() {
     let source = shelves_controller(contract::true_conditional_reopen_app());
     assert!(source.contains("\"gem label\""), "{source}");
 }
@@ -153,4 +152,39 @@ fn a_reopen_read_before_the_gems_opening_still_replaces_its_method_in_the_contro
         assert!(source.contains(needle), "{needle:?} in\n{source}");
     }
     assert!(!source.contains("\"gem label\""), "{source}");
+}
+
+/// A `label` defined under `if defined?(Shelf::Tagging)`, a constant the
+/// program carries, replaces the gem's: Ruby answers
+/// `"gem / local / app label"`.
+#[test]
+fn a_reopen_defining_a_method_when_a_carried_constant_is_defined_replaces_the_gems() {
+    let source = shelves_controller(contract::defined_reopen_app());
+    for needle in ["def original", "def local", "\"app label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"gem label\""), "{source}");
+}
+
+/// Under `unless defined?(Shelf::Tagging)` the reopen's `label` is never
+/// defined: Ruby answers `"gem / local / gem label"`.
+#[test]
+fn a_reopen_defining_a_method_unless_a_carried_constant_is_defined_keeps_the_gems() {
+    let source = shelves_controller(contract::undefined_reopen_app());
+    for needle in ["def original", "def local", "\"gem label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"app label\""), "{source}");
+}
+
+/// Under `if ENV["SHELF_LABEL"]` only running the program says whether the
+/// reopen's `label` is defined, so the splice keeps the gem's: what Ruby
+/// answers with the variable unset (`"gem / local / gem label"`).
+#[test]
+fn a_reopen_defining_a_method_under_an_unknown_condition_keeps_the_gems() {
+    let source = shelves_controller(contract::env_reopen_app());
+    for needle in ["def original", "def local", "\"gem label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"app label\""), "{source}");
 }

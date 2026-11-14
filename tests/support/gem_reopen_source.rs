@@ -303,9 +303,9 @@ pub fn conditional_reopen_app() -> emit_and_run::Overlay {
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
 
-/// [`conditional_reopen_app`] with the condition true. Ruby answers
-/// `"gem / local / app label"`; the emit keeps the gem's `label`, as the
-/// splice runs before load-time conditionals are settled.
+/// [`conditional_reopen_app`] with the constant true. Ruby answers
+/// `"gem / local / app label"`; a constant's value is not known where the
+/// reopen is spliced, so the emit keeps the gem's `label`.
 #[allow(dead_code)]
 pub fn true_conditional_reopen_app() -> emit_and_run::Overlay {
     with_gem_lib(SHELF_TAGGING)
@@ -349,5 +349,39 @@ pub fn twice_reopen_app() -> emit_and_run::Overlay {
 pub fn models_reopen_app() -> emit_and_run::Overlay {
     with_gem_lib(SHELF_TAGGING)
         .write("app/models/shelf_tagging_ext.rb", &format!("module ShelfTaggingExt\nend\n\n{TAGGING_REOPEN}"))
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
+
+/// A reopen of [`SHELF_TAGGING`] whose `label` is defined under `condition`.
+#[allow(dead_code)]
+fn tagging_under(condition: &str) -> String {
+    TAGGING_CONDITIONAL.replace("    FLAG = false\n\n", "").replace("if FLAG", condition)
+}
+
+/// The initializer defines `label` under `if defined?(Shelf::Tagging)`, a
+/// constant the program carries. Ruby answers `"gem / local / app label"`.
+#[allow(dead_code)]
+pub fn defined_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", &tagging_under("if defined?(Shelf::Tagging)"))
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
+
+/// [`defined_reopen_app`] with `unless`. Ruby answers
+/// `"gem / local / gem label"`.
+#[allow(dead_code)]
+pub fn undefined_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", &tagging_under("unless defined?(Shelf::Tagging)"))
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
+
+/// The initializer defines `label` under `if ENV["SHELF_LABEL"]`, which only
+/// running the program answers. Ruby answers `"gem / local / gem label"`
+/// with the variable unset and `"gem / local / app label"` with it set.
+#[allow(dead_code)]
+pub fn env_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", &tagging_under("if ENV[\"SHELF_LABEL\"]"))
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
