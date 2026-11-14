@@ -564,3 +564,26 @@ pub const SLUG_ASSERTIONS: &str = r##"got = Article.new(id: 7).to_param
 raise "to_param #{got.inspect}" unless got == "{expected}"
 puts "slug passed"
 "##;
+
+/// One reopen defining `to_param` unconditionally, then again under
+/// `if ENV["SHELF_SLUG"]`. Ruby answers `"app-7"` for
+/// `Article.new(id: 7).to_param` with the variable unset and `"env-7"`
+/// with it set.
+#[allow(dead_code)]
+pub fn slug_reopen_twice_app() -> emit_and_run::Overlay {
+    let reopen = "module Shelf\n  module Slug\n    def to_param\n      \"app-#{id}\"\n    end\n\n    if ENV[\"SHELF_SLUG\"]\n      def to_param\n        \"env-#{id}\"\n      end\n    end\n  end\nend\n";
+    with_gem_lib(SHELF_SLUG)
+        .write("config/initializers/shelf_slug.rb", reopen)
+        .edit("app/models/article.rb", "class Article < ApplicationRecord\n", "class Article < ApplicationRecord\n  include Shelf::Slug\n")
+}
+
+/// A reopen whose `to_param` reads `PREFIX`, a constant only the gem's
+/// opening declares. Ruby answers `"slug-7"` for `Article.new(id: 7).to_param`.
+#[allow(dead_code)]
+pub fn slug_reopen_prefix_app() -> emit_and_run::Overlay {
+    let gem = SHELF_SLUG.replace("  module Slug\n", "  module Slug\n    PREFIX = \"slug\"\n\n");
+    let reopen = "module Shelf\n  module Slug\n    def to_param\n      \"#{PREFIX}-#{id}\"\n    end\n  end\nend\n";
+    with_gem_lib(&gem)
+        .write("config/initializers/shelf_slug.rb", reopen)
+        .edit("app/models/article.rb", "class Article < ApplicationRecord\n", "class Article < ApplicationRecord\n  include Shelf::Slug\n")
+}

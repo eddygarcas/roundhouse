@@ -291,3 +291,25 @@ fn a_model_keeps_the_gems_to_param_over_a_reopens_unsettled_one() {
         .run_ruby(&contract::SLUG_ASSERTIONS.replace("{expected}", "gem-7"))
         .assert_passes();
 }
+
+/// An unconditional `to_param`, then one under `if ENV["SHELF_SLUG"]`, in
+/// the same reopen: only running the program answers the second, so the
+/// first stands over the gem's. Ruby answers `"app-7"` with the variable unset.
+#[test]
+fn a_model_takes_a_reopens_unconditional_to_param_over_its_later_unsettled_one() {
+    let to_param = article_to_param(contract::slug_reopen_twice_app());
+    assert!(to_param.contains("app-") && !to_param.contains("gem-"), "{to_param}");
+    contract::listed(contract::slug_reopen_twice_app())
+        .run_ruby(&contract::SLUG_ASSERTIONS.replace("{expected}", "app-7"))
+        .assert_passes();
+}
+
+/// The reopen's `to_param` reads `PREFIX`, which the gem's opening of the
+/// module declares: the model's copy names the module's constant, and
+/// Ruby answers `"slug-7"`.
+#[test]
+fn a_models_to_param_from_a_reopen_reads_the_gems_constant() {
+    contract::listed(contract::slug_reopen_prefix_app())
+        .run_ruby(&contract::SLUG_ASSERTIONS.replace("{expected}", "slug-7"))
+        .assert_passes();
+}
