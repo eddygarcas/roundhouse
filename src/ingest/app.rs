@@ -5046,37 +5046,42 @@ fn carry_included_block_includes_into_controllers(app: &mut App) {
 /// A module opened more than once (a source gem's, reopened by an
 /// initializer) has the `to_param` of its openings read in load order
 /// (`openings_gem_first`), as the controller splice reads a concern's
-/// methods: a later opening's definition replaces an earlier one, as a
-/// reopen does in Ruby. One under a load-time `if` is what `settle` makes
-/// of it: in an arm known to run it replaces as any definition does, in
-/// one known not to it is left out, and when only running the program
-/// answers the earlier definition stays.
+/// methods: a later definition replaces an earlier one, in the same
+/// opening or a later one, as a reopen does in Ruby. One under a load-time
+/// `if` is what `settle` makes of it: in an arm known to run it replaces as
+/// any definition does, in one known not to it is left out, and when only
+/// running the program answers the earlier definition stays. Its body
+/// reads the constants of every opening of the module.
 fn splice_concern_to_param_into_includers(app: &mut App) {
     use crate::det::{HashMap, HashSet};
     use crate::dialect::{MethodReceiver, ModelBodyItem};
     use crate::ident::{ClassId, Symbol};
 
     let name = Symbol::from("to_param");
-    let mut defs: HashMap<ClassId, (crate::dialect::MethodDef, HashSet<Symbol>)> = HashMap::default();
+    let mut defs: HashMap<ClassId, crate::dialect::MethodDef> = HashMap::default();
     let mut module_includes: HashMap<ClassId, Vec<ClassId>> = HashMap::default();
+    // Every opening's constants: the body of one opening's `to_param` reads another's lexically.
+    let mut module_consts: HashMap<ClassId, HashSet<Symbol>> = HashMap::default();
     let resolver = app.const_resolver.for_sources(&app.sources);
     let settler = super::settled_conditionals::Settler::of(app, &resolver);
     for lc in openings_gem_first(&app.library_classes, &app.sources) {
         module_includes.entry(lc.name.clone()).or_default().extend(lc.includes.iter().cloned());
+        module_consts.entry(lc.name.clone()).or_default().extend(lc.constants.iter().map(|(n, _)| n.clone()));
         if !lc.is_module {
             continue;
         }
-        // The last def of the name is the one Ruby keeps.
-        let Some(m) = lc.methods.iter().rev().find(|m| m.name == name && m.receiver == MethodReceiver::Instance) else { continue };
-        let def = (m.clone(), lc.constants.iter().map(|(n, _)| n.clone()).collect());
-        match settler.defines(lc, m) {
-            Some(true) => {
-                defs.insert(lc.name.clone(), def);
+        // In source order, within an opening as across them: a later
+        // definition replaces the one standing, unless it is known not to run.
+        for m in lc.methods.iter().filter(|m| m.name == name && m.receiver == MethodReceiver::Instance) {
+            match settler.defines(lc, m) {
+                Some(true) => {
+                    defs.insert(lc.name.clone(), m.clone());
+                }
+                None => {
+                    defs.entry(lc.name.clone()).or_insert_with(|| m.clone());
+                }
+                Some(false) => {}
             }
-            None => {
-                defs.entry(lc.name.clone()).or_insert(def);
-            }
-            Some(false) => {}
         }
     }
     if defs.is_empty() {
@@ -5102,10 +5107,10 @@ fn splice_concern_to_param_into_includers(app: &mut App) {
                 queue.extend(nested.iter().cloned());
             }
         }
-        let Some((concern, (method, consts))) = found else { continue };
+        let Some((concern, method)) = found else { continue };
         let mut method = method.clone();
         method.enclosing_class = Some(model.name.0.clone());
-        if !consts.is_empty() {
+        if let Some(consts) = module_consts.get(&concern).filter(|c| !c.is_empty()) {
             qualify_lexical_consts(&mut method.body, &concern, consts);
         }
         model.body.push(ModelBodyItem::Method { method, leading_comments: Vec::new(), leading_blank_line: true });
