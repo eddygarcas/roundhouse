@@ -1,27 +1,56 @@
 // Not both arms kept: a `defined?` of a class the app carries is settled when the body loads, and Ruby never defines the other arm's methods (et-orbi's tzinfo 1.x fallbacks).
 use crate::app::App;
-use crate::dialect::{ConditionalDefinitions, LibraryClass};
+use crate::dialect::{ConditionalDefinitions, LibraryClass, MethodDef};
 use crate::expr::ExprNode;
 
 pub(super) fn settle(app: &mut App) {
     let resolver = app.const_resolver.for_sources(&app.sources);
-    let known: crate::det::HashSet<String> = app
-        .library_classes
-        .iter()
-        .map(|c| c.name.0.as_str().to_string())
-        .chain(app.models.iter().map(|m| m.name.0.as_str().to_string()))
-        .collect();
-    let class_side = ClassSide::of(app);
+    let settler = Settler::of(app, &resolver);
     for lc in app.library_classes.iter_mut() {
         let records = std::mem::take(&mut lc.conditional_definitions);
-        let owner = lc.name.0.as_str().to_string();
         for record in records {
-            let here = Here { known: &known, resolver: &resolver, class_side: &class_side, owner: &owner, span: record.span };
-            match settled_arm(&record, &here) {
+            match settler.arm(lc.name.0.as_str(), &record) {
                 Some(kept) => drop_other_arms(lc, &record, kept),
                 None => lc.conditional_definitions.push(record),
             }
         }
+    }
+}
+
+/// What a load-time conditional settles to, as `settle` decides it, built
+/// once over the program's classes. The concern splice asks it too, before
+/// `settle` runs.
+pub(super) struct Settler<'r> {
+    known: crate::det::HashSet<String>,
+    resolver: &'r crate::analyze::ConstResolver,
+    class_side: ClassSide,
+}
+
+impl<'r> Settler<'r> {
+    pub(super) fn of(app: &App, resolver: &'r crate::analyze::ConstResolver) -> Self {
+        let known = app
+            .library_classes
+            .iter()
+            .map(|c| c.name.0.as_str().to_string())
+            .chain(app.models.iter().map(|m| m.name.0.as_str().to_string()))
+            .collect();
+        Settler { known, resolver, class_side: ClassSide::of(app) }
+    }
+
+    /// The arm of `record`, in the body of `owner`, that Ruby runs.
+    fn arm(&self, owner: &str, record: &ConditionalDefinitions) -> Option<usize> {
+        let here = Here { known: &self.known, resolver: self.resolver, class_side: &self.class_side, owner, span: record.span };
+        settled_arm(record, &here)
+    }
+
+    /// Whether `method`, one of `lc`'s, is defined as Ruby loads the body:
+    /// `Some(true)` outside every load-time conditional or in the arm one is
+    /// known to take, `Some(false)` in an arm it is known to skip, `None`
+    /// when only running the program answers.
+    pub(super) fn defines(&self, lc: &LibraryClass, method: &MethodDef) -> Option<bool> {
+        let Some(record) = lc.conditional_definitions.iter().find(|c| c.contains(method)) else { return Some(true) };
+        let arm = record.arms.iter().position(|a| a.methods.iter().any(|m| m.is(method)))?;
+        Some(self.arm(lc.name.0.as_str(), record)? == arm)
     }
 }
 

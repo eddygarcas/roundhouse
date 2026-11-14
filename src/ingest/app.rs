@@ -3346,7 +3346,8 @@ end
     carry_included_block_includes_into_controllers(&mut app);
     refuse_unread_concern_filters(&app)?;
     drop_modelled_included_hooks(&mut app);
-    splice_concerns_into_controllers(&mut app);
+    let splice_resolver = const_resolver.for_sources(&app.sources);
+    splice_concerns_into_controllers(&mut app, &splice_resolver);
     // After the splice: a concern's filter reads the key as the controller's own body does.
     crate::lower::primary_key_send::rewrite_guarded(&mut app);
     // After the splice: an action a concern provides is not implicit.
@@ -5067,7 +5068,7 @@ fn splice_concern_to_param_into_includers(app: &mut App) {
     }
 }
 
-fn splice_concerns_into_controllers(app: &mut App) {
+fn splice_concerns_into_controllers(app: &mut App, resolver: &crate::analyze::ConstResolver) {
     use crate::dialect::{Action, ControllerBodyItem, MethodReceiver, RenderTarget};
     use crate::ty::{Row, Ty};
 
@@ -5109,18 +5110,24 @@ fn splice_concerns_into_controllers(app: &mut App) {
     // in load order: Bundler loads the gem before the app's code runs, so
     // a gem's opening comes first. A method a later opening defines again
     // replaces the earlier one, as a reopen does in Ruby; the splice below
-    // takes the first of a name. One defined under a load-time `if` does
-    // not: whether Ruby runs it is settled after the splice, so the
-    // earlier definition stays ahead of it.
+    // takes the first of a name. One defined under a load-time `if` is
+    // what `settle` makes of it, asked here before that pass runs: in an
+    // arm known to run it replaces as any definition does, in one known
+    // not to it is left out, and when only running the program answers
+    // the earlier definition stays ahead of it.
     // From the App's sources: the registry was drained before this pass.
     let from_source_gem =
         |lc: &LibraryClass| opening_file(lc, &app.sources).is_some_and(super::absence_guards::is_source_gem_path);
+    let settler = super::settled_conditionals::Settler::of(app, resolver);
     let mut openings: Vec<&LibraryClass> = app.library_classes.iter().collect();
     openings.sort_by_key(|lc| !from_source_gem(lc));
     for lc in openings {
-        let conditional = |m: &crate::dialect::MethodDef| lc.conditional_definitions.iter().any(|c| c.contains(m));
-        let instance: Vec<&crate::dialect::MethodDef> =
-            lc.methods.iter().filter(|m| matches!(m.receiver, MethodReceiver::Instance)).collect();
+        let conditional = |m: &crate::dialect::MethodDef| settler.defines(lc, m).is_none();
+        let instance: Vec<&crate::dialect::MethodDef> = lc
+            .methods
+            .iter()
+            .filter(|m| matches!(m.receiver, MethodReceiver::Instance) && settler.defines(lc, m) != Some(false))
+            .collect();
         // Within one opening, too, the last definition of a name is the
         // one Ruby keeps; an earlier one is replaced, not an ancestor a
         // `super` reaches.
