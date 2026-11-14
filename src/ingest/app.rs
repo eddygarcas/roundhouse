@@ -5104,11 +5104,9 @@ fn splice_concerns_into_controllers(app: &mut App) {
     // takes the first of a name. One defined under a load-time `if` does
     // not: whether Ruby runs it is settled after the splice, so the
     // earlier definition stays ahead of it.
-    let from_source_gem = |lc: &LibraryClass| {
-        opening_span(lc)
-            .and_then(|span| super::sources::path_of(span.file))
-            .is_some_and(|path| super::absence_guards::is_source_gem_path(&path))
-    };
+    // From the App's sources: the registry was drained before this pass.
+    let from_source_gem =
+        |lc: &LibraryClass| opening_file(lc, &app.sources).is_some_and(super::absence_guards::is_source_gem_path);
     let mut openings: Vec<&LibraryClass> = app.library_classes.iter().collect();
     openings.sort_by_key(|lc| !from_source_gem(lc));
     for lc in openings {
