@@ -143,3 +143,14 @@ fn the_later_of_two_definitions_in_one_reopen_stands_in_the_controller() {
     assert!(source.contains("\"app label\""), "{source}");
     assert!(!source.contains("\"first label\"") && !source.contains("\"gem label\""), "{source}");
 }
+
+/// The gem's opening comes first in the splice even when the app's is
+/// read before it: Ruby answers `"gem / local / app label"`.
+#[test]
+fn a_reopen_read_before_the_gems_opening_still_replaces_its_method_in_the_controller() {
+    let source = shelves_controller(contract::models_reopen_app());
+    for needle in ["def original", "def local", "\"app label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"gem label\""), "{source}");
+}

@@ -340,3 +340,14 @@ pub fn twice_reopen_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_tagging.rb", TAGGING_TWICE)
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
+
+/// [`included_module_app`] with the reopen in `app/models/shelf_tagging_ext.rb`,
+/// a file that also defines its own `ShelfTaggingExt`. The models are read
+/// before the gem's files, but Ruby loads the gem first (Bundler, before
+/// Rails eager-loads `app/models`) and answers `"gem / local / app label"`.
+#[allow(dead_code)]
+pub fn models_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("app/models/shelf_tagging_ext.rb", &format!("module ShelfTaggingExt\nend\n\n{TAGGING_REOPEN}"))
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
