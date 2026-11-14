@@ -385,3 +385,66 @@ pub fn env_reopen_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_tagging.rb", &tagging_under("if ENV[\"SHELF_LABEL\"]"))
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
+
+/// A reopen of [`SHELF_TAGGING`] defining `self.enabled` under `{enabled}`,
+/// then `label` under `if respond_to?(:enabled)`.
+const TAGGING_RESPOND: &str = r##"module Shelf
+  module Tagging
+    {enabled}
+      def self.enabled
+        true
+      end
+    end
+
+    def local
+      "local"
+    end
+
+    if respond_to?(:enabled)
+      def label
+        "app label"
+      end
+    end
+  end
+end
+"##;
+
+fn respond_reopen_app(enabled: &str) -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", &TAGGING_RESPOND.replace("{enabled}", enabled))
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
+
+/// `self.enabled` under `unless defined?(Shelf::Tagging)`, which is never
+/// defined, so `respond_to?(:enabled)` is false. Ruby answers
+/// `"gem / local / gem label"`.
+#[allow(dead_code)]
+pub fn respond_after_skipped_app() -> emit_and_run::Overlay {
+    respond_reopen_app("unless defined?(Shelf::Tagging)")
+}
+
+/// `self.enabled` under `if ENV["SHELF_ENABLED"]`, which only running the
+/// program answers. Ruby answers `"gem / local / gem label"` with the
+/// variable unset and `"gem / local / app label"` with it set.
+#[allow(dead_code)]
+pub fn respond_after_unknown_app() -> emit_and_run::Overlay {
+    respond_reopen_app("if ENV[\"SHELF_ENABLED\"]")
+}
+
+/// `self.enabled` under `if defined?(Shelf::Tagging)`, so
+/// `respond_to?(:enabled)` is true. Ruby answers `"gem / local / app label"`.
+#[allow(dead_code)]
+pub fn respond_after_settled_app() -> emit_and_run::Overlay {
+    respond_reopen_app("if defined?(Shelf::Tagging)")
+}
+
+/// `label` under `if respond_to?(:enabled)`, written before `self.enabled`
+/// under `if defined?(Shelf::Tagging)`: the `respond_to?` runs before the
+/// method is defined. Ruby answers `"gem / local / gem label"`.
+#[allow(dead_code)]
+pub fn respond_before_settled_app() -> emit_and_run::Overlay {
+    let reopen = "module Shelf\n  module Tagging\n    def local\n      \"local\"\n    end\n\n    if respond_to?(:enabled)\n      def label\n        \"app label\"\n      end\n    end\n\n    if defined?(Shelf::Tagging)\n      def self.enabled\n        true\n      end\n    end\n  end\nend\n";
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", reopen)
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}

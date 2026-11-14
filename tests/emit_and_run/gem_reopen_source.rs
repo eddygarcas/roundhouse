@@ -188,3 +188,51 @@ fn a_reopen_defining_a_method_under_an_unknown_condition_keeps_the_gems() {
     }
     assert!(!source.contains("\"app label\""), "{source}");
 }
+
+/// `respond_to?(:enabled)` after `def self.enabled` in an arm Ruby skips
+/// (`unless defined?(Shelf::Tagging)`) is false, so the reopen's `label`
+/// is never defined: Ruby answers `"gem / local / gem label"`.
+#[test]
+fn a_respond_to_after_a_skipped_arms_class_method_keeps_the_gems() {
+    let source = shelves_controller(contract::respond_after_skipped_app());
+    for needle in ["def original", "def local", "\"gem label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"app label\""), "{source}");
+}
+
+/// After `def self.enabled` under `if ENV["SHELF_ENABLED"]`, only running
+/// the program says what `respond_to?(:enabled)` answers, so the splice
+/// keeps the gem's `label`: what Ruby answers with the variable unset
+/// (`"gem / local / gem label"`).
+#[test]
+fn a_respond_to_after_an_unknown_arms_class_method_keeps_the_gems() {
+    let source = shelves_controller(contract::respond_after_unknown_app());
+    for needle in ["def original", "def local", "\"gem label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"app label\""), "{source}");
+}
+
+/// After `def self.enabled` under `if defined?(Shelf::Tagging)`,
+/// `respond_to?(:enabled)` is true and the reopen's `label` replaces the
+/// gem's: Ruby answers `"gem / local / app label"`.
+#[test]
+fn a_respond_to_after_a_settled_arms_class_method_replaces_the_gems() {
+    let source = shelves_controller(contract::respond_after_settled_app());
+    for needle in ["def original", "def local", "\"app label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"gem label\""), "{source}");
+}
+
+/// A `respond_to?(:enabled)` written before the settled arm that defines
+/// `self.enabled` runs before it: Ruby answers `"gem / local / gem label"`.
+#[test]
+fn a_respond_to_before_a_settled_arms_class_method_keeps_the_gems() {
+    let source = shelves_controller(contract::respond_before_settled_app());
+    for needle in ["def original", "def local", "\"gem label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"app label\""), "{source}");
+}
