@@ -274,3 +274,41 @@ pub fn attr_module_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_box.rb", ATTR_REOPEN)
         .write("app/models/attr_probe.rb", ATTR_PROBE)
 }
+
+/// A reopen of [`SHELF_TAGGING`] that defines `label` only under a
+/// load-time `if` whose condition is false.
+pub const TAGGING_CONDITIONAL: &str = r##"module Shelf
+  module Tagging
+    FLAG = false
+
+    def local
+      "local"
+    end
+
+    if FLAG
+      def label
+        "app label"
+      end
+    end
+  end
+end
+"##;
+
+/// The controller including the gem module, the initializer's `label`
+/// under a false condition. Ruby answers `"gem / local / gem label"`.
+#[allow(dead_code)]
+pub fn conditional_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", TAGGING_CONDITIONAL)
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
+
+/// [`conditional_reopen_app`] with the condition true. Ruby answers
+/// `"gem / local / app label"`; the emit keeps the gem's `label`, as the
+/// splice runs before load-time conditionals are settled.
+#[allow(dead_code)]
+pub fn true_conditional_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", &TAGGING_CONDITIONAL.replace("FLAG = false", "FLAG = true"))
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}

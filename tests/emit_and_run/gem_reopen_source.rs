@@ -107,3 +107,30 @@ fn a_gem_module_with_only_an_attr_reader_keeps_the_initializers_methods() {
         .expect("app/models/shelf/box.rb");
     assert!(source.contains("def self.local_tag"), "{source}");
 }
+
+/// The emitted `ShelvesController`.
+fn shelves_controller(app: super::emit_and_run::Overlay) -> String {
+    let (emitted, _errors) = app.emit(BuildTarget::Spinel);
+    std::fs::read_to_string(emitted.join("app/controllers/shelves_controller.rb")).expect("shelves_controller.rb")
+}
+
+/// A `label` the initializer defines under a false load-time `if` does not
+/// replace the gem's: Ruby answers `"gem / local / gem label"`.
+#[test]
+fn a_conditional_reopen_does_not_replace_the_gems_method_in_the_controller() {
+    let source = shelves_controller(contract::conditional_reopen_app());
+    for needle in ["def original", "def local", "\"gem label\""] {
+        assert!(source.contains(needle), "{needle:?} in\n{source}");
+    }
+    assert!(!source.contains("\"app label\""), "{source}");
+}
+
+/// A known limit, pinned: with the condition true Ruby answers
+/// `"gem / local / app label"`, but the splice runs before load-time
+/// conditionals are settled, so a conditional `label` never replaces the
+/// gem's there. Settling them before the splice would lift it.
+#[test]
+fn a_conditional_reopen_with_a_true_flag_keeps_the_gems_method_until_conditionals_settle_before_the_splice() {
+    let source = shelves_controller(contract::true_conditional_reopen_app());
+    assert!(source.contains("\"gem label\""), "{source}");
+}
