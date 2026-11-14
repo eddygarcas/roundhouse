@@ -5101,7 +5101,9 @@ fn splice_concerns_into_controllers(app: &mut App) {
     // in load order: Bundler loads the gem before the app's code runs, so
     // a gem's opening comes first. A method a later opening defines again
     // replaces the earlier one, as a reopen does in Ruby; the splice below
-    // takes the first of a name.
+    // takes the first of a name. One defined under a load-time `if` does
+    // not: whether Ruby runs it is settled after the splice, so the
+    // earlier definition stays ahead of it.
     let from_source_gem = |lc: &LibraryClass| {
         opening_span(lc)
             .and_then(|span| super::sources::path_of(span.file))
@@ -5112,8 +5114,9 @@ fn splice_concerns_into_controllers(app: &mut App) {
     for lc in openings {
         let opened: Vec<&crate::dialect::MethodDef> =
             lc.methods.iter().filter(|m| matches!(m.receiver, MethodReceiver::Instance)).collect();
+        let conditional = |m: &crate::dialect::MethodDef| lc.conditional_definitions.iter().any(|c| c.contains(m));
         let methods = module_methods.entry(lc.name.clone()).or_default();
-        methods.retain(|m| !opened.iter().any(|o| o.name == m.name));
+        methods.retain(|m| !opened.iter().any(|o| o.name == m.name && !conditional(o)));
         methods.extend(opened);
         module_constants.entry(lc.name.clone()).or_default().extend(lc.constants.iter().map(|(n, _)| n.clone()));
         module_includes.entry(lc.name.clone()).or_default().extend(lc.includes.iter().cloned());
