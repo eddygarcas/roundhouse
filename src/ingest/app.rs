@@ -346,6 +346,8 @@ fn opening_span(lc: &LibraryClass) -> Option<crate::span::Span> {
         // a synthesized body but the name it was written with.
         .chain(lc.methods.iter().map(|m| m.name_span))
         .chain(lc.methods.iter().map(|m| m.body.span))
+        // A body that only sets a class-level variable (`@configured = true`).
+        .chain(lc.class_ivar_initializers.iter().map(|e| e.span))
         .chain(lc.unknown_calls.iter().map(|c| c.span))
         .find(|s| !s.is_synthetic())
 }

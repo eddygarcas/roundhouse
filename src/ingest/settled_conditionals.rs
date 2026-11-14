@@ -134,7 +134,12 @@ impl ClassSide {
         while let Some(c) = at {
             let defined = self.methods.get(&c).into_iter().flatten().filter(|(m, _)| m == name);
             // Not any of the class's own: one defined further down its body, or in a reopening loaded who knows when, is not there yet.
-            let before = |span: &crate::span::Span| c != class || (!span.is_synthetic() && span.file == here.file && span.start < here.start);
+            // A superclass's written further down the same file is not there yet either; one from another file is taken as loaded
+            // before, as which of two files loads first is not known here.
+            let same_file = |span: &crate::span::Span| !span.is_synthetic() && span.file == here.file;
+            let before = |span: &crate::span::Span| {
+                if c == class { same_file(span) && span.start < here.start } else { !same_file(span) || span.start < here.start }
+            };
             if defined.into_iter().any(|(_, span)| before(span)) {
                 return Some(true);
             }
