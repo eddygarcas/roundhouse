@@ -134,3 +134,12 @@ fn a_conditional_reopen_with_a_true_flag_keeps_the_gems_method_until_conditional
     let source = shelves_controller(contract::true_conditional_reopen_app());
     assert!(source.contains("\"gem label\""), "{source}");
 }
+
+/// The later of two `label`s in one opening is the one that stands, as in
+/// Ruby (`"gem / local / app label"`).
+#[test]
+fn the_later_of_two_definitions_in_one_reopen_stands_in_the_controller() {
+    let source = shelves_controller(contract::twice_reopen_app());
+    assert!(source.contains("\"app label\""), "{source}");
+    assert!(!source.contains("\"first label\"") && !source.contains("\"gem label\""), "{source}");
+}

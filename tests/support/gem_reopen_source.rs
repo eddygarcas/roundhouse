@@ -312,3 +312,31 @@ pub fn true_conditional_reopen_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_tagging.rb", &TAGGING_CONDITIONAL.replace("FLAG = false", "FLAG = true"))
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
+
+/// A reopen of [`SHELF_TAGGING`] that defines `label` twice.
+pub const TAGGING_TWICE: &str = r##"module Shelf
+  module Tagging
+    def local
+      "local"
+    end
+
+    def label
+      "first label"
+    end
+
+    def label
+      "app label"
+    end
+  end
+end
+"##;
+
+/// The controller including the gem module, the initializer defining
+/// `label` twice. Ruby answers `"gem / local / app label"`: the later
+/// definition stands.
+#[allow(dead_code)]
+pub fn twice_reopen_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_TAGGING)
+        .write("config/initializers/shelf_tagging.rb", TAGGING_TWICE)
+        .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
+}
