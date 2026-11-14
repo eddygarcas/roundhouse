@@ -5112,9 +5112,18 @@ fn splice_concerns_into_controllers(app: &mut App) {
     let mut openings: Vec<&LibraryClass> = app.library_classes.iter().collect();
     openings.sort_by_key(|lc| !from_source_gem(lc));
     for lc in openings {
-        let opened: Vec<&crate::dialect::MethodDef> =
-            lc.methods.iter().filter(|m| matches!(m.receiver, MethodReceiver::Instance)).collect();
         let conditional = |m: &crate::dialect::MethodDef| lc.conditional_definitions.iter().any(|c| c.contains(m));
+        let instance: Vec<&crate::dialect::MethodDef> =
+            lc.methods.iter().filter(|m| matches!(m.receiver, MethodReceiver::Instance)).collect();
+        // Within one opening, too, the last definition of a name is the
+        // one Ruby keeps; an earlier one is replaced, not an ancestor a
+        // `super` reaches.
+        let opened: Vec<&crate::dialect::MethodDef> = instance
+            .iter()
+            .enumerate()
+            .filter(|&(at, m)| !instance[at + 1..].iter().any(|later| later.name == m.name && !conditional(later)))
+            .map(|(_, m)| *m)
+            .collect();
         let methods = module_methods.entry(lc.name.clone()).or_default();
         methods.retain(|m| !opened.iter().any(|o| o.name == m.name && !conditional(o)));
         methods.extend(opened);
