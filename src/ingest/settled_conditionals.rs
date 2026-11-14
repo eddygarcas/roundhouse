@@ -34,7 +34,33 @@ impl<'r> Settler<'r> {
             .map(|c| c.name.0.as_str().to_string())
             .chain(app.models.iter().map(|m| m.name.0.as_str().to_string()))
             .collect();
-        Settler { known, resolver, class_side: ClassSide::of(app) }
+        let mut settler = Settler { known, resolver, class_side: ClassSide::of(app) };
+        // A class-side method in a conditional's arm answers a later
+        // `respond_to?` only once that arm is known to run, and settling
+        // one conditional can settle another: until no arm adds a method.
+        loop {
+            let mut reached = Vec::new();
+            for lc in &app.library_classes {
+                let owner = lc.name.0.as_str();
+                for record in &lc.conditional_definitions {
+                    let Some(arm) = settler.arm(owner, record).and_then(|k| record.arms.get(k)) else { continue };
+                    reached.extend(
+                        lc.methods
+                            .iter()
+                            .filter(|m| m.receiver == crate::dialect::MethodReceiver::Class && arm.methods.iter().any(|member| member.is(m)))
+                            .map(|m| (owner, m)),
+                    );
+                }
+            }
+            let mut added = false;
+            for (owner, m) in reached {
+                added |= settler.class_side.add(owner, m);
+            }
+            if !added {
+                break;
+            }
+        }
+        settler
     }
 
     /// The arm of `record`, in the body of `owner`, that Ruby runs.
@@ -63,6 +89,8 @@ struct ClassSide {
 }
 
 impl ClassSide {
+    /// The class-side methods defined outside every load-time conditional;
+    /// one inside an arm is added when the arm is known to run.
     fn of(app: &App) -> Self {
         let mut methods: crate::det::HashMap<String, Vec<(String, crate::span::Span)>> = crate::det::HashMap::default();
         let mut parents = crate::det::HashMap::default();
@@ -72,13 +100,30 @@ impl ClassSide {
                 lc.methods
                     .iter()
                     .filter(|m| m.receiver == crate::dialect::MethodReceiver::Class)
-                    .map(|m| (m.name.as_str().to_string(), if m.name_span.is_synthetic() { m.body.span } else { m.name_span })),
+                    .filter(|m| !lc.conditional_definitions.iter().any(|c| c.contains(m)))
+                    .map(|m| (m.name.as_str().to_string(), Self::start(m))),
             );
             if let Some(parent) = &lc.parent {
                 parents.insert(name, parent.0.as_str().trim_start_matches("::").to_string());
             }
         }
         ClassSide { methods, parents }
+    }
+
+    /// Where a method's definition starts (a synthesized one has no file).
+    fn start(m: &MethodDef) -> crate::span::Span {
+        if m.name_span.is_synthetic() { m.body.span } else { m.name_span }
+    }
+
+    /// Adds `m` to `class`'s class-side methods; whether it was not there.
+    fn add(&mut self, class: &str, m: &MethodDef) -> bool {
+        let entry = (m.name.as_str().to_string(), Self::start(m));
+        let methods = self.methods.entry(class.to_string()).or_default();
+        if methods.contains(&entry) {
+            return false;
+        }
+        methods.push(entry);
+        true
     }
 
     /// Whether `class` or a superclass the program carries defines `name` on its class side by the time the body
