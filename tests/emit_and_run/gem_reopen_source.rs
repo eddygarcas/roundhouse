@@ -259,3 +259,35 @@ fn a_respond_to_before_a_superclasss_class_method_in_the_same_file_is_not_settle
     let source = std::fs::read_to_string(emitted.join("app/models/shelf/child.rb")).expect("app/models/shelf/child.rb");
     assert!(source.contains("if respond_to?(:enabled)"), "{source}");
 }
+
+/// The emitted `Article`'s copy of the `to_param` its included module defines.
+fn article_to_param(app: super::emit_and_run::Overlay) -> String {
+    let (emitted, _errors) = contract::listed(app).emit(BuildTarget::Spinel);
+    let source = std::fs::read_to_string(emitted.join("app/models/article.rb")).expect("app/models/article.rb");
+    let at = source.find("def to_param").unwrap_or_else(|| panic!("def to_param in\n{source}"));
+    source[at..].lines().take(3).collect::<Vec<_>>().join("\n")
+}
+
+/// The initializer's reopen of a gem module redefines the `to_param` a
+/// model takes from it: Ruby answers `"app-7"`, and the model's copy is
+/// the reopen's.
+#[test]
+fn a_model_takes_to_param_from_the_initializers_reopen_of_a_gem_module() {
+    let to_param = article_to_param(contract::slug_reopen_plain_app());
+    assert!(to_param.contains("app-") && !to_param.contains("gem-"), "{to_param}");
+    contract::listed(contract::slug_reopen_plain_app())
+        .run_ruby(&contract::SLUG_ASSERTIONS.replace("{expected}", "app-7"))
+        .assert_passes();
+}
+
+/// A reopen's `to_param` under `if ENV["SHELF_SLUG"]` is not known to be
+/// defined, so the gem's stays the model's: Ruby answers `"gem-7"` with
+/// the variable unset.
+#[test]
+fn a_model_keeps_the_gems_to_param_over_a_reopens_unsettled_one() {
+    let to_param = article_to_param(contract::slug_reopen_env_app());
+    assert!(to_param.contains("gem-") && !to_param.contains("app-"), "{to_param}");
+    contract::listed(contract::slug_reopen_env_app())
+        .run_ruby(&contract::SLUG_ASSERTIONS.replace("{expected}", "gem-7"))
+        .assert_passes();
+}

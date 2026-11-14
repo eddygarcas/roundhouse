@@ -514,3 +514,53 @@ pub fn inherited_respond_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_kinds.rb", KINDS_REOPEN)
         .write("app/models/kinds_probe.rb", "class KindsProbe\n  def self.describe\n    Shelf::Child.new.label\n  end\nend\n")
 }
+
+/// A gem module a model includes for its `to_param`.
+pub const SHELF_SLUG: &str = r##"module Shelf
+  module Slug
+    def to_param
+      "gem-#{id}"
+    end
+  end
+end
+"##;
+
+/// An initializer's reopen of it, `to_param` written under `{guard}` (empty for none).
+const SLUG_REOPEN: &str = r##"module Shelf
+  module Slug
+    {guard}
+    def to_param
+      "app-#{id}"
+    end
+    {end}
+  end
+end
+"##;
+
+/// `Article` including the gem's `Shelf::Slug`, which the initializer
+/// reopens with its own `to_param`, written under `guard` when one is given.
+fn slug_reopen_app(guard: Option<&str>) -> emit_and_run::Overlay {
+    let reopen = SLUG_REOPEN.replace("{guard}", guard.unwrap_or("")).replace("{end}", if guard.is_some() { "end" } else { "" });
+    with_gem_lib(SHELF_SLUG)
+        .write("config/initializers/shelf_slug.rb", &reopen)
+        .edit("app/models/article.rb", "class Article < ApplicationRecord\n", "class Article < ApplicationRecord\n  include Shelf::Slug\n")
+}
+
+/// Ruby answers `"app-7"` for `Article.new(id: 7).to_param`.
+#[allow(dead_code)]
+pub fn slug_reopen_plain_app() -> emit_and_run::Overlay {
+    slug_reopen_app(None)
+}
+
+/// The reopen's `to_param` under `if ENV["SHELF_SLUG"]`, which only running
+/// the program answers. Ruby answers `"gem-7"` with the variable unset and
+/// `"app-7"` with it set.
+#[allow(dead_code)]
+pub fn slug_reopen_env_app() -> emit_and_run::Overlay {
+    slug_reopen_app(Some("if ENV[\"SHELF_SLUG\"]"))
+}
+
+pub const SLUG_ASSERTIONS: &str = r##"got = Article.new(id: 7).to_param
+raise "to_param #{got.inspect}" unless got == "{expected}"
+puts "slug passed"
+"##;
