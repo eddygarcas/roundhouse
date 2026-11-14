@@ -448,3 +448,69 @@ pub fn respond_before_settled_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_tagging.rb", reopen)
         .write("app/controllers/shelves_controller.rb", SHELVES_CONTROLLER)
 }
+
+/// A gem class whose body only sets a class instance variable.
+pub const SHELF_IVAR: &str = r##"module Shelf
+  class Box
+    @configured = true
+  end
+end
+"##;
+
+/// An initializer adding a class method to a gem class whose only member
+/// is a class instance variable. Ruby answers `"local"` for
+/// `AttrProbe.describe`.
+#[allow(dead_code)]
+pub fn ivar_class_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_IVAR)
+        .write("config/initializers/shelf_box.rb", &ATTR_REOPEN.replace("module Box", "class Box"))
+        .write("app/models/attr_probe.rb", ATTR_PROBE)
+}
+
+/// A gem `Shelf::Base` with a method of its own, so its opening is the
+/// gem's, and `Shelf::Child < Shelf::Base` (the superclass written in full) whose `label` answers `"gem label"`.
+pub const SHELF_KINDS: &str = r##"module Shelf
+  class Base
+    def self.kind
+      "base"
+    end
+  end
+
+  class Child < Shelf::Base
+    def label
+      "gem label"
+    end
+  end
+end
+"##;
+
+/// An initializer reopening `Child` with `label` under
+/// `if respond_to?(:enabled)`, then `Base` with `self.enabled` under
+/// `if defined?(Shelf::Base)`: the `respond_to?` runs before `enabled` is
+/// defined.
+pub const KINDS_REOPEN: &str = r##"module Shelf
+  class Child
+    if respond_to?(:enabled)
+      def label
+        "app label"
+      end
+    end
+  end
+
+  class Base
+    if defined?(Shelf::Base)
+      def self.enabled
+        true
+      end
+    end
+  end
+end
+"##;
+
+/// Ruby answers `"gem label"` for `Shelf::Child.new.label`.
+#[allow(dead_code)]
+pub fn inherited_respond_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_KINDS)
+        .write("config/initializers/shelf_kinds.rb", KINDS_REOPEN)
+        .write("app/models/kinds_probe.rb", "class KindsProbe\n  def self.describe\n    Shelf::Child.new.label\n  end\nend\n")
+}

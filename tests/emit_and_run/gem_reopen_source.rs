@@ -236,3 +236,26 @@ fn a_respond_to_before_a_settled_arms_class_method_keeps_the_gems() {
     }
     assert!(!source.contains("\"app label\""), "{source}");
 }
+
+/// A gem class whose only member is a class instance variable
+/// (`@configured = true`) is still the gem's, so the initializer's opening
+/// is kept: Ruby answers `"local"`.
+#[test]
+fn a_gem_class_with_only_a_class_ivar_keeps_the_initializers_methods() {
+    let source = std::fs::read_to_string(contract::ivar_class_app().emit(BuildTarget::Spinel).0.join("app/models/shelf/box.rb"))
+        .expect("app/models/shelf/box.rb");
+    assert!(source.contains("def self.local_tag"), "{source}");
+}
+
+/// `Child`'s `if respond_to?(:enabled)` runs before the later reopen of its
+/// superclass defines `self.enabled` in the same file, so Ruby answers
+/// `"gem label"`. The guard is not settled from that later definition: the
+/// emitted `Child` keeps it. (A Ruby run of the tree can't show this: each
+/// class's openings are written to its own file, and `child.rb` requires
+/// `base.rb`, so the emitted program defines `enabled` first.)
+#[test]
+fn a_respond_to_before_a_superclasss_class_method_in_the_same_file_is_not_settled() {
+    let (emitted, _errors) = contract::listed(contract::inherited_respond_app()).emit(BuildTarget::Ruby);
+    let source = std::fs::read_to_string(emitted.join("app/models/shelf/child.rb")).expect("app/models/shelf/child.rb");
+    assert!(source.contains("if respond_to?(:enabled)"), "{source}");
+}
