@@ -340,6 +340,9 @@ fn opening_span(lc: &LibraryClass) -> Option<crate::span::Span> {
     std::iter::once(lc.parent_span)
         .chain(lc.include_spans.iter().copied())
         .chain(lc.constants.iter().map(|(_, v)| v.span))
+        // A method's name before its body: an `attr_reader`'s reader has
+        // a synthesized body but the name it was written with.
+        .chain(lc.methods.iter().map(|m| m.name_span))
         .chain(lc.methods.iter().map(|m| m.body.span))
         .chain(lc.unknown_calls.iter().map(|c| c.span))
         .find(|s| !s.is_synthetic())
