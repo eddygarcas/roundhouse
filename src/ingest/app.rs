@@ -276,6 +276,7 @@ fn keep_initializer_defined(
     sources: &[crate::span::SourceFile],
     gem_mounts: &[PathBuf],
     candidates: Vec<LibraryClass>,
+    callback_constants: &std::collections::HashSet<String>,
 ) {
     const CORE: &[&str] = &[
         "Object", "BasicObject", "Kernel", "Module", "Class", "Comparable",
@@ -287,7 +288,8 @@ fn keep_initializer_defined(
     let root = dir.display().to_string();
     let root = root.trim_end_matches('/');
     let referenced = |name: &str| {
-        sources.iter().any(|f| {
+        // A carried after_initialize body runs at boot, so what it names is live.
+        callback_constants.contains(name) || sources.iter().any(|f| {
             let rel = f.path.strip_prefix(root).unwrap_or(&f.path).trim_start_matches('/');
             if !(rel.starts_with("app/") || rel.starts_with("lib/") || rel == "config/puma.rb") {
                 return false;
@@ -2793,6 +2795,9 @@ end
     // `FileId(1)` is how a synthesized parse failure once rendered
     // against an unrelated real file (see `ingest::sources`'s module
     // doc). The real drain runs after them, below.
+    // after_initialize bodies, and the app files they require, are part of the
+    // source walk; their reopens are applied at the end (`after_initialize::apply`).
+    let callbacks = super::after_initialize::read_all(vfs, dir)?;
     let sources = std::sync::Arc::new(super::sources::snapshot());
     let const_resolver =
         crate::analyze::ConstResolverTask::start(std::sync::Arc::clone(&sources));
@@ -3039,7 +3044,8 @@ end
         enum_input_files.iter().chain(boot_files.iter()).cloned().collect();
     enum_constants.validate_consumed_sources(&app, &sources, &observed)?;
     let gem_mounts: Vec<PathBuf> = source_gems.iter().map(|gem| gem.mount.clone()).collect();
-    keep_initializer_defined(&mut app, dir, &sources, &gem_mounts, initializer_defined);
+    let callback_constants = super::after_initialize::named_constants(&callbacks);
+    keep_initializer_defined(&mut app, dir, &sources, &gem_mounts, initializer_defined, &callback_constants);
     // `self.queue_adapter =` on ApplicationJob (see `App::queue_adapter`).
     apply_application_job_queue_adapter(&mut app);
     let const_resolver = crate::timings::phase("rubydex: wait", || const_resolver.finish());
@@ -3060,6 +3066,9 @@ end
         ));
     }
     super::propshaft::ingest(vfs, dir, &mut app)?;
+    // The after_initialize callbacks (read before the source snapshot):
+    // applied once every library class exists, so a reopen finds its module.
+    super::after_initialize::apply(&mut app, callbacks)?;
     // The ledger of boot statements no recognizer above read. A warning
     // per statement, in the ingest diagnostic channel; no `App` field.
     let app_namespaces: HashSet<String> = app
