@@ -358,6 +358,20 @@ fn opening_file<'s>(lc: &LibraryClass, sources: &'s [crate::span::SourceFile]) -
     sources.get((span.file.0 as usize).checked_sub(1)?).map(|f| f.path.as_str())
 }
 
+/// Every opening of the program's library classes in load order, as far as
+/// the splices need it: a source gem's openings first, as Bundler loads the
+/// gem before the app's code runs, then the rest as read. The order within
+/// each group is kept. From the App's sources: the registry is drained by
+/// the time the splices run. It takes those two fields rather than the App,
+/// so a splice can change the App's other fields while it reads them.
+fn openings_gem_first<'a>(library_classes: &'a [LibraryClass], sources: &[crate::span::SourceFile]) -> Vec<&'a LibraryClass> {
+    let from_source_gem =
+        |lc: &LibraryClass| opening_file(lc, sources).is_some_and(super::absence_guards::is_source_gem_path);
+    let mut openings: Vec<&LibraryClass> = library_classes.iter().collect();
+    openings.sort_by_key(|lc| !from_source_gem(lc));
+    openings
+}
+
 /// Admission is based on the callable retained from app source, not a target's
 /// spelling. Inherited, reopened, macro-defined and instance-only endpoints
 /// cannot establish that the mounted constant itself implements Rack's call.
@@ -5028,6 +5042,15 @@ fn carry_included_block_includes_into_controllers(app: &mut App) {
 /// `splice_concern_class_methods_into_includers`, and takes its include
 /// order: the first module of the includer's include closure that defines
 /// `to_param` wins.
+///
+/// A module opened more than once (a source gem's, reopened by an
+/// initializer) has the `to_param` of its openings read in load order
+/// (`openings_gem_first`), as the controller splice reads a concern's
+/// methods: a later opening's definition replaces an earlier one, as a
+/// reopen does in Ruby. One under a load-time `if` is what `settle` makes
+/// of it: in an arm known to run it replaces as any definition does, in
+/// one known not to it is left out, and when only running the program
+/// answers the earlier definition stays.
 fn splice_concern_to_param_into_includers(app: &mut App) {
     use crate::det::{HashMap, HashSet};
     use crate::dialect::{MethodReceiver, ModelBodyItem};
@@ -5036,14 +5059,24 @@ fn splice_concern_to_param_into_includers(app: &mut App) {
     let name = Symbol::from("to_param");
     let mut defs: HashMap<ClassId, (crate::dialect::MethodDef, HashSet<Symbol>)> = HashMap::default();
     let mut module_includes: HashMap<ClassId, Vec<ClassId>> = HashMap::default();
-    for lc in &app.library_classes {
+    let resolver = app.const_resolver.for_sources(&app.sources);
+    let settler = super::settled_conditionals::Settler::of(app, &resolver);
+    for lc in openings_gem_first(&app.library_classes, &app.sources) {
         module_includes.entry(lc.name.clone()).or_default().extend(lc.includes.iter().cloned());
-        if !lc.is_module || defs.contains_key(&lc.name) {
+        if !lc.is_module {
             continue;
         }
         // The last def of the name is the one Ruby keeps.
-        if let Some(m) = lc.methods.iter().rev().find(|m| m.name == name && m.receiver == MethodReceiver::Instance) {
-            defs.insert(lc.name.clone(), (m.clone(), lc.constants.iter().map(|(n, _)| n.clone()).collect()));
+        let Some(m) = lc.methods.iter().rev().find(|m| m.name == name && m.receiver == MethodReceiver::Instance) else { continue };
+        let def = (m.clone(), lc.constants.iter().map(|(n, _)| n.clone()).collect());
+        match settler.defines(lc, m) {
+            Some(true) => {
+                defs.insert(lc.name.clone(), def);
+            }
+            None => {
+                defs.entry(lc.name.clone()).or_insert(def);
+            }
+            Some(false) => {}
         }
     }
     if defs.is_empty() {
@@ -5126,13 +5159,8 @@ fn splice_concerns_into_controllers(app: &mut App, resolver: &crate::analyze::Co
     // arm known to run it replaces as any definition does, in one known
     // not to it is left out, and when only running the program answers
     // the earlier definition stays ahead of it.
-    // From the App's sources: the registry was drained before this pass.
-    let from_source_gem =
-        |lc: &LibraryClass| opening_file(lc, &app.sources).is_some_and(super::absence_guards::is_source_gem_path);
     let settler = super::settled_conditionals::Settler::of(app, resolver);
-    let mut openings: Vec<&LibraryClass> = app.library_classes.iter().collect();
-    openings.sort_by_key(|lc| !from_source_gem(lc));
-    for lc in openings {
+    for lc in openings_gem_first(&app.library_classes, &app.sources) {
         let conditional = |m: &crate::dialect::MethodDef| settler.defines(lc, m).is_none();
         let instance: Vec<&crate::dialect::MethodDef> = lc
             .methods
