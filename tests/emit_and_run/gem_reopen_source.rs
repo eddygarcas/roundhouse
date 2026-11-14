@@ -98,3 +98,12 @@ fn a_gem_module_declared_empty_keeps_the_initializers_methods() {
         .expect("app/models/shelf/hooks.rb");
     assert!(source.contains("def self.hook"), "{source}");
 }
+
+/// A gem module whose only member is an `attr_reader` is still the gem's,
+/// so the initializer's opening is kept.
+#[test]
+fn a_gem_module_with_only_an_attr_reader_keeps_the_initializers_methods() {
+    let source = std::fs::read_to_string(contract::attr_module_app().emit(BuildTarget::Spinel).0.join("app/models/shelf/box.rb"))
+        .expect("app/models/shelf/box.rb");
+    assert!(source.contains("def self.local_tag"), "{source}");
+}

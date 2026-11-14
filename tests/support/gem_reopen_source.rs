@@ -240,3 +240,37 @@ pub fn empty_module_app() -> emit_and_run::Overlay {
         .write("config/initializers/shelf_hooks.rb", HOOKS_REOPEN)
         .write("app/models/hook_probe.rb", HOOK_PROBE)
 }
+
+/// A gem module whose only member is an `attr_reader`.
+pub const SHELF_ATTR: &str = r##"module Shelf
+  module Box
+    attr_reader :value
+  end
+end
+"##;
+
+/// An initializer's reopen of it, adding a module method.
+pub const ATTR_REOPEN: &str = r##"module Shelf
+  module Box
+    def self.local_tag
+      "local"
+    end
+  end
+end
+"##;
+
+pub const ATTR_PROBE: &str = r##"class AttrProbe
+  def self.describe
+    Shelf::Box.local_tag
+  end
+end
+"##;
+
+/// An initializer adding a method to a gem module that has only an
+/// `attr_reader`. Ruby answers `"local"` for `AttrProbe.describe`.
+#[allow(dead_code)]
+pub fn attr_module_app() -> emit_and_run::Overlay {
+    with_gem_lib(SHELF_ATTR)
+        .write("config/initializers/shelf_box.rb", ATTR_REOPEN)
+        .write("app/models/attr_probe.rb", ATTR_PROBE)
+}
